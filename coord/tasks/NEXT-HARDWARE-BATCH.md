@@ -1,5 +1,42 @@
 # Next useful hardware batch — no speculative test loop
 
+## Next concrete proposal: one numeric admission snapshot, approval pending
+
+Prepared exp9/code68 diagnostic-only source; not a zoom correction. Keep existing
+caps/predicate/accounting and fail/explicit Fit recovery unchanged. Capture numeric
+pixels/charge/source/used/limit under the existing lock, correlate native view/
+ticket and original command scene token. No file path/content/hash in new log.
+Finish focused tests, independent review, exact clean build/signature before use.
+User question for ONE separately bounded diagnostic zoom attempt is pending; do
+not install or run it without task authority and NEW reservation/preflight.
+Question: does source+new charge exceed allowance even when existing charge is
+zero, or are existing charges necessary for rejection? Counters alone do not
+classify those existing charges as stale. Log exact scene relationship; stop on
+runtime/source/page/owner/ink/transport/cleanup ambiguity. On rejection, only
+explicit Try Fit then normal Close/restoration/integrity/exact cleanup/release.
+No repeated zoom, cap raise, root, firmware, pen, original activation or merge.
+
+## Current: code67 gate completed with zoom FAIL; no unchanged retry
+
+H8R1 installed exacte53a86f/exp8/code67 normally/ON, then transport change BEFORE
+activation; NOTPERFORMED/clean restoration and53 exact owned files removed,
+RELEASE6208597108. NEW H8R2 exact runtime/admission/bookmark affordance/valid
+bookmark/Back PASS; ONE1.25 zoom FAIL on shared-raster-budget rejection. Pan
+NOTPERFORMED; no automatic retry during observed26-second error interval. Explicit
+Try Fit restored exact reader PNG; normal Close/native and initial disposable
+scene exact; all source/annotation/copy/public/preferences integrity PASS.30
+owned captures removed/absence verified; RELEASE6208694362. No device process.
+
+Next is concrete source-only budget/scale/lifetime diagnosis from the recorded
+failure and independent narrow review. The current exception omits actual budget
+operands; do not guess the cause or raise caps. No repeated zoom/re-activation on
+unchanged67. Any correction/diagnostic candidate needs focused checks, review,
+exact build/signing and appropriate hardware authority/fresh reservation. No
+physical action needed now; device connection is not required for offline work.
+Remaining portrait/RTL/fixture/Edit smoke is not a PASS and is parked behind this
+failed gate. Preserve original data, local evidence/rollback and paused timers;
+no source/binary/raw/private-metadata publication or merge.
+
 ## Immediate unblock: reconnect for SAME approved, verified code67 H8
 
 Exact e53a86f/exp8/code67 source correction independently CLEAR, normal exact

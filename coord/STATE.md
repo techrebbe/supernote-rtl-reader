@@ -1,5 +1,47 @@
 # STATE — RTL Reader (updated 2026-10-16 by codex)
 
+## Local next candidate: exp9/code68 numeric admission diagnostic, not a zoom fix
+
+Independent narrow source audit found no proven allocation/accounting defect:
+the captured rejection proves only the existing shared-admission inequality.
+Prepared immutable numeric snapshot at that synchronized check, same predicate/
+message/accounting/caps. Native log includes original-command scene token plus
+view/ticket so JS-rejected stale scenes can be distinguished; no path/content/hash.
+Logging runtime/linkage failures cannot prevent existing terminal failure handling.
+29 actual ledger/report/fail assertions and stale-diagnostic mutant PASS. Final
+independent13-file correction/identity/pin confirmation CLEAR; normalized23-input
+aggregate de66ece0...f7077a9. Integration7/destinations1/stream2,164JS,85407core/
+all271mutations/invariants/packaging/wiring6 PASS. Exact commit/build/signing next.
+Candidate exp9/code68 UNBUILT/UNINSTALLED; installed67 unchanged. New diagnostic
+hardware scope question sent; do not infer approval or a root-cause/zoom fix.
+
+## Latest hardware: code67 installed; bookmarks PASS, zoom FAIL; released
+
+H8R1 reservation6208270169 normally upgraded to exact e53a86f/exp8/code67,
+manager ON verified. Transport changed before activation: interaction NOTPERFORMED.
+Recovery restored the actual initial disposable page/full PNG, exact integrity,
+51 owned captures+2 unique stages removed/absence verified; RELEASE6208597108.
+
+NEW H8R2 reservation6208618671, SAME installed67/no reinstall: exact runtime,
+original-page admission, disabled unsupported bookmarks/retained nested entries,
+one independently checked valid original bookmark and exact Back PASS. ONE1.25
+zoom FAIL: shared raster budget rejection; Pan NOTPERFORMED. Terminal error held
+without automatic retry/READY for the observed26-second interval. Explicit Try
+Fit produced fresh READY and the exact initial reader PNG. Normal Close verified
+SDK page handoff and exact native PNG; actual initial disposable page/full PNG,
+originals/annotations/copies/public packages/preferences restored/exact.30 owned
+captures removed/absence verified; RELEASE6208694362. Local raw/copies/rollback
+retained. No active device process; Nomad free, connection not needed offline.
+
+Full interactive-use readiness remains OPEN. Next is bounded SOURCE-ONLY budget/
+allocation diagnosis and independent narrow review, not repeated zoom on unchanged
+67, cap increases or speculative framework/emulator work. Current failure log
+does not expose the actual heap limit, charged owners or attempted dimensions;
+do not attribute it to a specific leak/heap/lifecycle cause without evidence.
+Remaining smoke stays unclaimed behind this gate. Ink PARKED/timers PAUSED;
+no root/firmware/source or binary publication/merge. Historical UNINSTALLED and
+transport-pending notes below are superseded by this actual hardware result.
+
 ## Latest: code67 reviewed/built/verified, UNINSTALLED; H8 transport block
 
 Exact executable e53a86fd84abd8b5d475bd622a7551ac3702c824 / exp8/code67 independently

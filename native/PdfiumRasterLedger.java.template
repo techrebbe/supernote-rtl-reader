@@ -16,11 +16,22 @@ final class PdfiumRasterLedger {
         // every retained/pending Java bitmap. Engine native allocations still
         // have the independently enforced 6M raster cap, not a total-memory proof.
         if (charge > limit - sourceBytes - used)
-            throw new IllegalStateException("Zoom exceeds the shared raster budget; use Fit");
+            throw new Rejected(pixels, charge, sourceBytes, used, limit);
         used += charge;
         return new Lease(this, charge, pixels*4);
     }
     synchronized long used() { return used; }
+    // Snapshot under reserve's lock, before any accounting mutation. This is
+    // admission evidence, not an OOM, leak or owner-lifetime classification.
+    static final class Rejected extends IllegalStateException {
+        private static final long serialVersionUID=1L;
+        final long pixels, chargeBytes, sourceBytes, usedBytes, limitBytes;
+        Rejected(long count, long charge, long source, long used, long limit) {
+            super("Zoom exceeds the shared raster budget; use Fit");
+            pixels=count; chargeBytes=charge; sourceBytes=source;
+            usedBytes=used; limitBytes=limit;
+        }
+    }
     static final class Lease {
         private final PdfiumRasterLedger ledger;
         private long charge;

@@ -1,5 +1,27 @@
 # T018I — user-approved PDFium reader integration
 
+LOCAL next diagnostic exp9/code68: immutable snapshot of existing synchronized
+ledger-rejection operands; same predicate/caps/message/accounting, numeric native
+view/ticket/original scene-token correlation only. No guessed fix or private
+identity/content logging. Actual ledger/report/fail29 assertions/stale mutant PASS;
+independent final13-file confirmation CLEAR; integration7/destinations1/stream2,
+164JS/85407core/271mutations/invariants/wiring6 PASS. Exact build/signing pending.
+UNBUILT/UNINSTALLED,
+installed67 unchanged; new one-shot diagnostic hardware question sent/pending.
+
+LATEST actual67 hardware supersedes UNINSTALLED below. Normal exacte53a86f/exp8/
+code67 upgrade/ON in H8R1; transport interruption before activation, clean recovery/
+53 owned files removed/RELEASE6208597108. Fresh H8R2 runtime/admission, disabled
+unsupported bookmarks/retained children, independently checked valid target/Back
+PASS. ONE1.25 zoom FAIL(shared raster budget), Pan NOTPERFORMED; terminal error
+held without automatic retry26seconds. Explicit Try Fit/exact reader PNG and
+normal SDK Close/native PNG PASS. Initial disposable scene/source/annotation/
+copies/public/preferences exact,30 captures removed/absence verified; RELEASE
+6208694362. No active device process; raw/copies/rollback retained locally.
+Next bounded source-only budget diagnosis/independent review; no guessed leak
+cause, cap increase, repeated unchanged probe or speculative emulator prerequisite.
+Full interactive readiness and remaining smoke OPEN. No publication or merge.
+
 LATEST code67 exacte53a86f: independent correction confirmation sole P2 CLOSED/no
 new blocker; normal clean-archive build exit0/75 tasks/full package-source-DEX-ELF-
 engine-notices-bundle/signature PASS, actual-APK provider11 PASS. SNPLG426d127b...89e3dc,

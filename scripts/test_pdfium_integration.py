@@ -173,6 +173,90 @@ public class DrawTest {
                 self.assertIn(failure,broken.stderr,label)
             print('3 compiled actual-onDraw defect mutants rejected')
 
+    def test_rejection_snapshot_preserves_actual_admission(self):
+        # Actual ledger/report method, controlled Log peer. Numeric admission
+        # evidence only: this does not prove Android heap size or owner lifetime.
+        source=(ROOT/'native/PdfiumPageView.java.template').read_text(encoding='utf-8')
+        begin=source.index('    private void reportRasterRejection(')
+        report=source[begin:source.index('    private void fail(',begin)]
+        begin=source.index('    private void fail(')
+        failure=source[begin:source.index('    private void releaseFrame()',begin)]
+        harness=r'''package test;
+class WritableMap {void putString(String key,String value){}}
+class ActualPage {
+ boolean disposed,failed,ready=true,pressed=true;long revision=8;int getId(){return 77;}
+ int start=1,end=2,events;String selected="old";
+ WritableMap packet(String kind){return new WritableMap();}
+ void emit(WritableMap event){events++;}void invalidate(){}
+ /*ACTUAL_REPORT*/
+ /*ACTUAL_FAIL*/
+ void report(long ticket,Throwable error){reportRasterRejection(ticket,5,error);}
+ void publish(long ticket,long renderToken,Throwable error){reportRasterRejection(ticket,renderToken,error);fail(ticket,"PDF page/zoom rejected: "+error.getMessage());}
+}
+public class SnapshotTest {
+ static int assertions;static void ok(boolean b,String label){if(!b)throw new AssertionError(label);assertions++;}
+ static PdfiumRasterLedger.Rejected reject(PdfiumRasterLedger ledger,long pixels,long source){
+  try{ledger.reserve(pixels,source);throw new AssertionError("unexpected admission");}
+  catch(PdfiumRasterLedger.Rejected error){return error;}
+ }
+ public static void main(String[] args)throws Exception {
+  PdfiumRasterLedger ledger=new PdfiumRasterLedger(100000000);
+  PdfiumRasterLedger.Lease prior=ledger.reserve(3000000,0);prior.installed();
+  PdfiumRasterLedger.Rejected error=reject(ledger,3000000,20000000);
+  ok(error.pixels==3000000&&error.chargeBytes==26097152,"attempt snapshot");
+  ok(error.sourceBytes==20000000&&error.usedBytes==12000000&&error.limitBytes==50000000,"atomic existing operands");
+  ok(error.getMessage().equals("Zoom exceeds the shared raster budget; use Fit"),"user message unchanged");
+  ok(ledger.used()==12000000,"rejection does not charge or retire another owner");
+  for(java.lang.reflect.Field field:PdfiumRasterLedger.Rejected.class.getDeclaredFields())
+   ok(java.lang.reflect.Modifier.isFinal(field.getModifiers()),"snapshot immutable");
+  prior.release();prior.release();ok(ledger.used()==0&&error.usedBytes==12000000,"snapshot survives later ledger changes");
+  PdfiumRasterLedger.Lease next=ledger.reserve(3000000,20000000);
+  ok(ledger.used()==26097152,"same predicate admits after legitimate charge is released");
+  next.installed();next.installed();ok(ledger.used()==12000000,"successful installation unchanged");
+  next.release();ok(ledger.used()==0,"successful release unchanged");
+  PdfiumRasterLedger.Rejected intrinsic=reject(ledger,1,49000000);
+  ok(intrinsic.usedBytes==0&&intrinsic.sourceBytes+intrinsic.chargeBytes>intrinsic.limitBytes,"intrinsic pressure distinguishable");
+  boolean invalid=false;try{ledger.reserve(6000001,0);}catch(IllegalArgumentException expected){invalid=true;}
+  ok(invalid&&ledger.used()==0,"raster cap not bypassed");
+  ActualPage page=new ActualPage();page.report(7,error);
+  ok(android.util.Log.calls==0,"stale rejection not published");
+  page.disposed=true;page.report(8,error);page.disposed=false;
+  page.failed=true;page.report(8,error);page.failed=false;
+  page.report(8,new IllegalStateException("other failure"));
+  ok(android.util.Log.calls==0,"disposed/failed/unrelated rejection not published");
+  page.report(8,error);
+  ok(android.util.Log.calls==1&&android.util.Log.tag.equals("RTL_PDFIUM_RASTER"),"one admitted numeric diagnostic");
+  ok(android.util.Log.text.equals("rejected view=77 ticket=8 renderToken=5 pixels=3000000 chargeBytes=26097152 sourceBytes=20000000 usedBytes=12000000 limitBytes=50000000"),"numeric original-scene snapshot has no path/content/hash");
+  ok(!page.disposed&&!page.failed&&page.revision==8&&ledger.used()==0,"diagnostic does not change state/admission");
+  android.util.Log.reject=1;page.report(8,error);
+  ok(!page.failed&&page.revision==8&&ledger.used()==0,"logging failure cannot alter existing failure path");
+  for(int rejection:new int[]{0,1,2}){
+   android.util.Log.reject=rejection;ActualPage terminal=new ActualPage();
+   terminal.publish(8,41,error);
+   ok(terminal.failed&&!terminal.ready&&!terminal.pressed&&terminal.events==1,"actual fail continues after log success/runtime/linkage failure");
+   ok(ledger.used()==0&&error.usedBytes==12000000,"terminal publication preserves snapshot/accounting");
+  }
+  android.util.Log.reject=0;ActualPage stale=new ActualPage();stale.publish(7,40,error);
+  ok(!stale.failed&&stale.events==0,"stale admitted callback cannot latch a newer view revision");
+  System.out.println(assertions+" actual rejection snapshot/report assertions PASS (controlled Log)");
+ }
+}
+'''
+        home=Path(os.environ['JAVA_HOME'])/'bin';suffix='.exe' if os.name=='nt' else ''
+        with tempfile.TemporaryDirectory(prefix='pdfium-rejection-') as temp:
+            root=Path(temp);java=root/'SnapshotTest.java';ledger=root/'PdfiumRasterLedger.java'
+            log=root/'android/util/Log.java';log.parent.mkdir(parents=True)
+            log.write_text('package android.util; public class Log { public static int calls,reject; public static String tag,text; public static int w(String t,String s){if(reject==1)throw new SecurityException("controlled log failure");if(reject==2)throw new LinkageError("controlled log linkage failure");calls++;tag=t;text=s;return 0;} }',encoding='utf-8')
+            ledger.write_text((ROOT/'native/PdfiumRasterLedger.java.template').read_text().replace('__PACKAGE__','test'),encoding='utf-8')
+            def run(body):
+                java.write_text(harness.replace('/*ACTUAL_REPORT*/',body).replace('/*ACTUAL_FAIL*/',failure),encoding='utf-8')
+                subprocess.run([str(home/('javac'+suffix)),'-encoding','UTF-8','-d',temp,str(log),str(ledger),str(java)],check=True)
+                return subprocess.run([str(home/('java'+suffix)),'-cp',temp,'test.SnapshotTest'],capture_output=True,text=True)
+            correct=run(report);self.assertEqual(correct.returncode,0,correct.stderr);print(correct.stdout.strip())
+            broken=run(report.replace('revision!=ticket || ',''))
+            self.assertNotEqual(broken.returncode,0);self.assertIn('stale rejection not published',broken.stderr)
+            self.assertIn('reportRasterRejection(ticket,command.optLong("renderToken",-1),error);fail(ticket,',source)
+
     def test_aggregate_ledger_actual_java(self):
         home=Path(os.environ['JAVA_HOME'])/'bin'
         suffix='.exe' if os.name=='nt' else ''

@@ -1070,7 +1070,9 @@ def check(repo_root: Path) -> None:
             # T018I exp7 marker exp6 -> exp7 ONLY; destination policy separate.
             # T018I exp8 proposed marker exp7 -> exp8 ONLY. Exact reverse
             # replacement restores 9f482372...c6283b; review pending separately.
-            "e93ab365edc9ff58cdfea59976653f6c49859b5b822e59a7bf98f4bbef76651c",
+            # T018I exp9 diagnostic candidate: marker exp8 -> exp9 ONLY;
+            # reverse restores e93ab365...f76651c. Admission/counters separate.
+            "7a8d04e80e58b4ff6c723ec8218a676a35c96ffc7066e6fbf897846ed2e15aac",
             "Edit/Return activation and close authority",
         ),
         (
@@ -1102,7 +1104,9 @@ def check(repo_root: Path) -> None:
             # T018I exp7 artifact label and destination/outline suite only.
             # T018I exp8 proposed artifact label ONLY; exact reverse replacement
             # restores 9a98a760...e95c6. No SDK/signing/action/permission delta.
-            "75cf3831c21ad3f912cf39bb7622cfac7cede85176bd0bc36ab936e7cfa2b09a",
+            # T018I exp9 artifact label ONLY; reverse restores
+            # 75cf3831...2b09a. SDK/signing/actions/permissions unchanged.
+            "770414edf9717e6e7458eb8119b48c28874149c194d9ebf30e36bc3a64725f58",
             "Native Spread companion-build workflow",
         ),
         (

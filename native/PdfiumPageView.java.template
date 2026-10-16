@@ -123,7 +123,7 @@ public final class PdfiumPageView extends View {
                 });
             }catch(Exception|LinkageError error){
                 if(image!=null)image.recycle();if(allocation!=null)allocation.release();
-                dispatch(()->fail(ticket,"PDF page/zoom rejected: "+error.getMessage()));
+                dispatch(()->{reportRasterRejection(ticket,command.optLong("renderToken",-1),error);fail(ticket,"PDF page/zoom rejected: "+error.getMessage());});
             }
         });
     }
@@ -152,6 +152,17 @@ public final class PdfiumPageView extends View {
     }
     private void emit(WritableMap event){
         if(!disposed && getId()!=NO_ID)((ThemedReactContext)getContext()).getJSModule(RCTEventEmitter.class).receiveEvent(getId(),"topPdfiumEvent",event);
+    }
+    private void reportRasterRejection(long ticket,long renderToken,Throwable error){
+        // Same native UI admission as fail(). Original command's scene token
+        // correlates with JS, which may already reject this old keyed view.
+        // No PDF identity/content; never restamp with a newer desired request.
+        if(disposed || revision!=ticket || failed || !(error instanceof PdfiumRasterLedger.Rejected))return;
+        PdfiumRasterLedger.Rejected snapshot=(PdfiumRasterLedger.Rejected)error;
+        try{android.util.Log.w("RTL_PDFIUM_RASTER","rejected view="+getId()+" ticket="+ticket+" renderToken="+renderToken+
+            " pixels="+snapshot.pixels+" chargeBytes="+snapshot.chargeBytes+
+            " sourceBytes="+snapshot.sourceBytes+" usedBytes="+snapshot.usedBytes+" limitBytes="+snapshot.limitBytes);
+        }catch(RuntimeException|LinkageError ignored){/* Diagnostics cannot prevent the existing fail path. */}
     }
     private void fail(long ticket,String message){
         // A queued layout/property transaction may beat React's fatalError

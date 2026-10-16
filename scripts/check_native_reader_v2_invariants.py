@@ -136,7 +136,7 @@ def main() -> None:
     require(
         plugin_config,
         # T018I exp5 confines painting to each original-page viewport.
-        ['"versionCode": "67"', '"versionName": "0.4.25-pdfium-exp8"'],
+        ['"versionCode": "68"', '"versionName": "0.4.25-pdfium-exp9"'],
         "plugin version",
     )
     require(
@@ -162,7 +162,7 @@ def main() -> None:
         not in root_build
     ):
         fail("plugin build does not execute the exclusive v2 invariant gate")
-    if "RTL_READER_OPEN v0.4.25-pdfium-exp8-native-reader-v2" not in index:
+    if "RTL_READER_OPEN v0.4.25-pdfium-exp9-native-reader-v2" not in index:
         fail("runtime marker does not identify the v2 plugin build")
     require(
         guidance,
@@ -3441,7 +3441,7 @@ def main() -> None:
             "python3 scripts/test_build_provenance.py .",
             "out/build-provenance/SupernoteRtlReader.bundle",
             "out/build-provenance/app.npk",
-            "supernote-rtl-reader-v0.4.25-pdfium-exp8-native-reader-v2",
+            "supernote-rtl-reader-v0.4.25-pdfium-exp9-native-reader-v2",
             "native-spread-upgrade-artifact:",
             "github.event_name == 'workflow_dispatch'",
             "github.actor == github.repository_owner",

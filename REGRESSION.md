@@ -1,5 +1,75 @@
 # RTL Reader hardware regression
 
+## 2026-10-16 — next diagnostic source prepared, no new device result
+
+Independent narrow audit of the code67 failure found no proven arithmetic,
+scale or lease-imbalance defect. The unique message locates shared reserve()
+after dimensions admission and before the failed request's model/render calls.
+It is a policy rejection, not evidence of OOM. Existing logs omit its operands.
+
+Prepared diagnostic-only exp9/code68: immutable rejection snapshot captures actual
+pixels/charge/sourceBytes/used/limit under the same synchronized predicate; exact
+message/accounting/caps unchanged. Native reporting uses original command's scene
+token plus numeric view/ticket, guards native failure admission, and isolates
+logging runtime/linkage errors before existing terminal fail(). No source paths,
+content or hashes added to the log.29 actual-ledger/report/fail assertions and
+stale-diagnostic mutant PASS with controlled Log peers; no Android/heap/root-cause
+claim. Marker/artifact-only candidate pins reverse exactly to reviewed exp8 pins.
+
+Final independent13-file review/identity/pin confirmation CLEAR. Integration7,
+native destinations1/stream2,164JS/85407core/all271mutations/native-v2-Edit-crosslayer/
+packaging/wiring6 PASS. Existing ELF8 PASS/one artifact-dependent check skipped
+before new build; no new-package provider claim. Initial two runner invocations
+had missing PYTHON_BIN and a spurious unittest dot argument; correct invocations
+PASS without production changes. Normal clean exact build/signing next; candidate
+UNBUILT/UNINSTALLED, installed67 unchanged. Separate one-shot diagnostic hardware
+question sent, not yet approved. No repeated unchanged probe, cap increase, source/
+binary publication or merge. Prior H8R2 result remains FAIL_ZOOM.
+
+## 2026-10-16 — code67 installed; bookmark correction PASS, modest zoom FAIL
+
+Exact reviewed/built e53a86fd84abd8b5d475bd622a7551ac3702c824,
+0.4.25-pdfium-exp8/code67, same signed package recorded below; no rebuild/relabel.
+Fresh H8R1 reservation6208270169: normal manager upgrade/exp8 ON PASS; transport
+changed before activation. Interaction NOTPERFORMED, not a failed reader launch.
+Known current connection re-established with local identity verification; actual
+initial disposable page/full-scene PNG restored byte-identically. Originals/
+annotation/copies/public packages/rotation preferences exact.51 owned hash-backed
+captures and2 unique installation stages removed/absence verified. RELEASE
+6208597108. Private connection/source metadata and raw remain local.
+
+Fresh H8R2 reservation6208618671, same installed67/no reinstall:
+
+- Exact exp8 runtime marker once, disposable-copy admission/count/first READY PASS.
+- Unsupported original bookmark rows visibly gray, labeled unavailable and
+  accessibility-disabled; nested entries retained. Valid original bookmark
+  destination independently matched retained local source render; Back restores
+  initial reader PNG exactly. PASS; no unsupported target activated.
+- ONE modest1.25 zoom FAIL: explicit shared-raster-budget rejection. Pan
+  NOTPERFORMED. Unlike66, the terminal error does not automatically retry/READY
+  during the observed26-second interval. This closes the observed retry behavior,
+  not the zoom resource problem or a general concurrency/leak proof.
+- Only predefined explicit Try Fit recovery used. Fresh READY token6 and initial
+  reader PNG exact; no second zoom/re-activation/cap increase. Normal Close SDK
+  page handoff and native whole PNG exact; actual initial disposable starting
+  page/full PNG exact. PASS for recovery and restoration, not whole trial.
+- Originals/existing annotation/disposable copies/public packages/preferences
+  exact.30 exact local-backed regular owned capture files removed and absence
+  verified; raw/copies/rollback retained. RELEASE6208694362, no device process.
+
+Local evidence: tmp/t018ih8-exp8-6208270169-20261016 and
+tmp/t018ih8-exp8-6208618671-20261016. Original documents were not activated or
+written; no pen, root, firmware, other-plugin change or merge. Source/binary/raw
+publication is not authorized by this result. Independent PDF render comparison
+does not establish selectable text in scanned pages or whole-book acceptance.
+
+Next: narrow source-only budget/scale/retained-allocation diagnosis and independent
+review. Current exception records neither attempted dimensions nor actual heap/
+ledger operands; no specific leak/lifetime/heap root cause is yet established.
+Remaining smoke unperformed; full interactive-use readiness OPEN. Do not repeat
+unchanged zoom, blindly repin/raise caps or start speculative framework/emulator
+archaeology. Ink PARKED/timers PAUSED.
+
 ## 2026-10-16 — exact code67 built/verified; H8 NOTPERFORMED, transport unavailable
 
 Independent correction confirmation at e53a86fd84abd8b5d475bd622a7551ac3702c824:

@@ -1017,7 +1017,9 @@ def check(repo_root: Path) -> None:
         ),
         (
             repo_root / "overlay" / "sdkPageHandoff.js",
-            "df47e354f13810574619fe87e48a0045735a804f6e2b0bf69846e36dbf4a3e89",
+            # H13 correction: one SDK jump, bounded read-only confirmation;
+            # exact document/count/source guards retained. Independently reviewed.
+            "8d15ceacd13d43656aa2ab86d5e30aeb26b5023390ca207fb3eff9560ffaf5e1",
             "shared supported SDK page handoff",
         ),
         (
@@ -1074,7 +1076,8 @@ def check(repo_root: Path) -> None:
             # reverse restores e93ab365...f76651c. Admission/counters separate.
             # T018I exp10 marker ONLY; reverse restores
             # 7a8d04e8...2e15aac. Revision admission is in the final generator.
-            "f021214731211d3bc55098617720077bf195cd2dbca7a878dc27181ba4fc901c",
+            # H13 exp11 marker ONLY; exact reverse restores f0212147...c901c.
+            "d362a3fafe9761e15e621e6eb695c00765be98c8685c46682577b2d2484919a4",
             "Edit/Return activation and close authority",
         ),
         (
@@ -1110,7 +1113,8 @@ def check(repo_root: Path) -> None:
             # 75cf3831...2b09a. SDK/signing/actions/permissions unchanged.
             # T018I exp10 artifact label ONLY; reverse restores
             # 770414ed...64725f58. No test/build/signing/SDK/action change.
-            "2d6bbabb6a56d13f8e31f872687429156f75121c14a483adab4c7a91a1d43bc9",
+            # H13 exp11 artifact label ONLY; reverse restores 2d6bbabb...43bc9.
+            "8f773bbada5899e422615ee7536653777043e5165ad261c88335c7862bc93255",
             "Native Spread companion-build workflow",
         ),
         (

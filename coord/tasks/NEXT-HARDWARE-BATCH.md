@@ -1,5 +1,26 @@
 # Next useful hardware batch — no speculative test loop
 
+## Current: interactive reading smoke PASS; Edit correction before new device work
+
+H11 native relayout explicitly accepted by user. Same installed89ddd40/exp10/code69
+H12 NEW6215944967 landscape links/Back, English selection/own verified Copy,
+original bookmarks, ONE1.25zoom/Pan/Fit PASS; exact reader/native restoration,
+full data/settings integrity,36 captures cleaned/absence, RELEASE6216131210.
+H13 NEW6216175388 ONE Edit p.2 failed SDK page confirmation; rollback PAGE1 and
+normal Close SDK-verified PAGE1 PASS. No reopen/Return/pen; native body/toolbar
+exact, footer history controls differ. Integrity/preferences exact,10 captures
+cleaned/absence, RELEASE6216295885/no device process. No reinstall in either trial.
+
+Do not repeat unchanged69 Edit or infer acceptance from reading gates. Concrete
+offline helper correction/regressions allow only bounded read-only settling after
+ONE jump, preserve all document/count/source guards, add numeric failure evidence.
+Local tests and independent correction/final identity-pin review CLEAN; device
+cause still only a timing hypothesis. exp11/code70 selected, unbuilt/uninstalled.
+Next: exact clean package/signature; then request exact new-package approval and fresh reservation for
+the SAME single left-page Edit/Return question. No extra emulator/ink prerequisite,
+other installations, originals, root/firmware, publication, timer or merge.
+Eight read observations/seven100ms waits are not a whole-call wall-clock deadline.
+
 ## Current: navigation/rotation PASS; stop at native terminal-image mismatch
 
 Remaining same69 smoke scope APPROVED. First trial H11 NEW6215242749 used exact

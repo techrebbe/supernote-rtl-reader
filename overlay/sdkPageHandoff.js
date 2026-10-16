@@ -3,7 +3,8 @@
 // Shared by Edit and ordinary Close. Only the supported current-document SDK
 // jump is a mutation. Preparation/validation read our own preferences and the
 // public PDF; never access Document's private CONFIG or restart its process.
-async function handoffSavedPage({preferences, comm, doc, isCurrent, expected}) {
+async function handoffSavedPage({preferences, comm, doc, isCurrent, expected,
+  waitForConfirmation = ms => new Promise(resolve => setTimeout(resolve, ms))}) {
   const current = () => {
     if (isCurrent() !== true) throw new Error('Reader handoff owner changed.');
   };
@@ -47,17 +48,31 @@ async function handoffSavedPage({preferences, comm, doc, isCurrent, expected}) {
   await file(); current(); // Last supported document check before dispatch.
   const jumped = await result(comm.jumpToPage(target.pageIndex), 'page jump');
   if (jumped !== true) throw new Error('The native reader rejected the page jump.');
-  // Once dispatched, finish read-only verification even after an unmount. The
-  // caller may retain an accepted return record, but must not close a new view.
-  await file();
-  const page = await result(comm.getCurrentPageNum(), 'current page');
-  const afterCount = await result(doc.getCurrentTotalPages(), 'page count');
-  await validate();
-  await file();
-  if (page !== target.pageIndex || afterCount !== count) {
-    throw new Error('The native reader did not confirm the requested page.');
+  // Acknowledging the one navigation request does not promise that a following
+  // read already sees it. Allow only a bounded read-only settling interval;
+  // never redispatch the jump or accept setter success as page confirmation.
+  // Every observation retains the document/count/prepared-source checks. Once
+  // dispatched, read-only verification may finish after unmount; the caller must
+  // not close a replacement view. This is not an atomic writer-state witness.
+  for (let attempt = 1; attempt <= 8; ++attempt) {
+    await file();
+    const page = await result(comm.getCurrentPageNum(), 'current page');
+    const afterCount = await result(doc.getCurrentTotalPages(), 'page count');
+    await validate();
+    await file();
+    if (afterCount !== count) {
+      const observed = Number.isInteger(afterCount) ? afterCount : 'invalid';
+      throw new Error(`The native reader did not confirm the requested page: page count changed expected=${count} observed=${observed}.`);
+    }
+    if (!Number.isInteger(page) || page < 0 || page >= count) {
+      throw new Error('The native reader returned an invalid page number.');
+    }
+    if (page === target.pageIndex) return {...target, navigation: 'sdk-verified'};
+    if (attempt === 8) {
+      throw new Error(`The native reader did not confirm the requested page: expected=${target.pageIndex} observed=${page} count=${count} attempts=${attempt}.`);
+    }
+    await waitForConfirmation(100);
   }
-  return {...target, navigation: 'sdk-verified'};
 }
 
 module.exports = {handoffSavedPage};

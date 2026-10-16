@@ -1,5 +1,27 @@
 # T018I — user-approved PDFium reader integration
 
+LATEST user accepted H11 native relayout; SAME69 H12 landscape interaction smoke
+PASS under6215944967: direct/named links/Back, English selection/verified own Copy,
+original bookmark/Back,1.25zoom/Pan/Fit, exact reader/native restoration and full
+integrity/settings.36 captures cleaned/absence; RELEASE6216131210. H13 ONE left
+Edit p.2 under6216175388 FAIL at SDK confirmation. Prefs rollback PAGE1/recovery
+UI and normal SDK Close PAGE1 verified; no reopen/Return or pen. Native body/
+toolbar exact, footer history controls differ; data/settings exact,10 captures
+cleaned/absence, RELEASE6216295885/no device process.69 retained/no reinstall.
+
+Edit helper correction is SOURCE ONLY: ONE jump then up to8 read-only observations,
+100ms between mismatches, same document/count/prepared-source validation every
+time, invalid responses/count change terminal, numeric-only failure evidence.
+Old helper fails delayed-visibility regression; local correction38 handoff cases,
+81 Node/generated tests/66 lifecycle assertions and relevant invariants PASS.
+Independent correction and identity/pin review CLEAN, three reviewer defect
+variants rejected;85407Core/all271mutations/cross-layer/wiring6 PASS. exp11/code70
+selected UNBUILT/UNINSTALLED; clean exact package/signature next. No proven
+hardware root cause or whole-call timeout claim (8 observations/seven100ms waits
+only). Separate reviewed helper/index hashes supplement unchanged23-input PDFium
+aggregate. No unchanged69 retest/emulator, source/binary/private upload, saved-ink
+revival, timer or merge; exact new-package approval before hardware.
+
 LATEST H11 NEW6215242749, remaining same69 smoke APPROVED; first navigation/
 rotation trial completed on exact installed89ddd40/exp10/code69/no reinstall.
 Portrait turns, RTL spread PAGE1right/PAGE2left->PAGE3right/PAGE4left->first pair,

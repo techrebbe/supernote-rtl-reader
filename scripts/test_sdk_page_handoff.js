@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const {test} = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 const {handoffSavedPage} = require('../overlay/sdkPageHandoff');
 const target = {filePath: '/Document/test.pdf', pageIndex: 1, requestId: 'one-shot'};
 const ok = result => ({success: true, result});
@@ -11,10 +12,15 @@ function harness(options = {}) {
   let page = 0, current = true;
   const paths = [...(options.paths ?? [])];
   const counts = [...(options.counts ?? [])];
+  const pages = [...(options.pages ?? [])];
   const validations = [...(options.validations ?? [])];
   const args = {
     isCurrent: () => current,
     expected: options.expected ?? {...target, totalPages: 2},
+    waitForConfirmation: async ms => {
+      calls.push(['wait', ms]);
+      if (options.onWait) await options.onWait(() => {current = false;});
+    },
     preferences: {
       async handoffLastSavedPage() {
         calls.push('prepare');
@@ -30,7 +36,7 @@ function harness(options = {}) {
     },
     comm: {
       async getCurrentFilePath() {calls.push('file'); return paths.length ? paths.shift() : ok(target.filePath);},
-      async getCurrentPageNum() {calls.push('page'); return options.afterPage ?? ok(page);},
+      async getCurrentPageNum() {calls.push('page'); return pages.length ? pages.shift() : options.afterPage ?? ok(page);},
       async jumpToPage(index) {
         calls.push(['jump', index]); page = index;
         if (options.unmountOnJump) current = false;
@@ -39,7 +45,7 @@ function harness(options = {}) {
     },
     doc: {async getCurrentTotalPages() {calls.push('count'); return counts.length ? counts.shift() : ok(2);}},
   };
-  return {args, calls, run: () => handoffSavedPage(args)};
+  return {args, calls, run: () => (options.route ?? handoffSavedPage)(args)};
 }
 test('actual shared route jumps once and verifies exact document, source, count and page', async () => {
   const h = harness();
@@ -78,6 +84,94 @@ for (const jump of [ok(false), ok('true'), {success: false, error: {message: 'na
 test('wrong post-jump page and changed post-jump count fail even after true setter success', async () => {
   await assert.rejects(harness({afterPage: ok(0)}).run(), /did not confirm/);
   await assert.rejects(harness({counts: [ok(2), ok(3)]}).run(), /did not confirm/);
+});
+
+test('one acknowledged SDK jump can settle after its first read without another mutation', async () => {
+  const h = harness({pages: [ok(0), ok(0), ok(1)]});
+  assert.equal((await h.run()).navigation, 'sdk-verified');
+  assert.equal(h.calls.filter(call => Array.isArray(call) && call[0] === 'jump').length, 1);
+  assert.equal(h.calls.filter(call => call === 'page').length, 3);
+  assert.deepEqual(h.calls.filter(call => Array.isArray(call) && call[0] === 'wait'),
+    [['wait', 100], ['wait', 100]]);
+});
+
+test('unconfirmed SDK position is bounded and includes numeric evidence, never a second jump', async () => {
+  const h = harness({afterPage: ok(0)});
+  await assert.rejects(h.run(), /did not confirm.*expected=1 observed=0 count=2 attempts=8/);
+  assert.equal(h.calls.filter(call => call === 'page').length, 8);
+  assert.equal(h.calls.filter(call => Array.isArray(call) && call[0] === 'wait').length, 7);
+  assert.equal(h.calls.filter(call => Array.isArray(call) && call[0] === 'jump').length, 1);
+});
+
+test('deferred confirmation revalidates document, count and prepared source at each observation', async () => {
+  const valid = harness({pages: [ok(0), ok(1)]});
+  await valid.run();
+  assert.deepEqual(valid.calls.slice(-5), ['file', 'page', 'count', ['validate', 'one-shot'], 'file']);
+  const changedFile = harness({pages: [ok(0), ok(1)], paths: [
+    ok(target.filePath), ok(target.filePath), ok(target.filePath), ok(target.filePath), ok('/Document/other.pdf'),
+  ]});
+  await assert.rejects(changedFile.run(), /document changed/);
+  assert.equal(changedFile.calls.filter(call => call === 'page').length, 1);
+  const changedCount = harness({pages: [ok(0), ok(1)], counts: [ok(2), ok(2), ok(3)]});
+  await assert.rejects(changedCount.run(), /page count changed/);
+  const replaced = harness({pages: [ok(0), ok(1)], validations: [true, true, false]});
+  await assert.rejects(replaced.run(), /source PDF changed/);
+});
+
+for (const page of [-1, 2, '1', null, NaN]) {
+  test(`invalid post-jump position ${page} fails immediately instead of waiting`, async () => {
+    const h = harness({afterPage: ok(page)});
+    await assert.rejects(h.run(), /invalid page/);
+    assert.ok(!h.calls.some(call => Array.isArray(call) && call[0] === 'wait'));
+  });
+}
+
+test('SDK read failure during delayed confirmation is terminal', async () => {
+  const h = harness({pages: [ok(0), {success: false, error: {message: 'page unavailable'}}]});
+  await assert.rejects(h.run(), /page unavailable/);
+  assert.equal(h.calls.filter(call => call === 'page').length, 2);
+});
+
+test('unmount after dispatch permits only bounded read-only confirmation', async () => {
+  const h = harness({pages: [ok(0), ok(1)], onWait: retire => retire()});
+  assert.equal((await h.run()).navigation, 'sdk-verified');
+  assert.equal(h.calls.filter(call => Array.isArray(call) && call[0] === 'jump').length, 1);
+  assert.ok(!h.calls.some(call => call === 'close' || call === 'restart' || call === 'save'));
+});
+
+test('the last permitted observation can confirm; no later observation is allowed', async () => {
+  const h = harness({pages: [...Array.from({length: 7}, () => ok(0)), ok(1)]});
+  assert.equal((await h.run()).navigation, 'sdk-verified');
+  assert.equal(h.calls.filter(call => call === 'page').length, 8);
+  assert.equal(h.calls.filter(call => Array.isArray(call) && call[0] === 'wait').length, 7);
+});
+
+test('actual default timer permits an asynchronous SDK visibility callback, not an immediate setter witness', async () => {
+  let visible = 0;
+  const waits = [];
+  const source = fs.readFileSync(path.join(__dirname, '../overlay/sdkPageHandoff.js'), 'utf8');
+  const context = vm.createContext({module: {exports: {}}, setTimeout(callback, ms) {
+    waits.push(ms);
+    queueMicrotask(() => {visible = 1; callback();});
+  }});
+  vm.runInContext(source, context);
+  const h = harness({route: context.module.exports.handoffSavedPage});
+  delete h.args.waitForConfirmation;
+  h.args.comm.getCurrentPageNum = async () => {h.calls.push('page'); return ok(visible);};
+  assert.equal((await h.run()).navigation, 'sdk-verified');
+  assert.deepEqual(waits, [100]);
+  assert.equal(h.calls.filter(call => call === 'page').length, 2);
+  assert.equal(h.calls.filter(call => Array.isArray(call) && call[0] === 'jump').length, 1);
+});
+
+test('invalid count diagnostics cannot emit arbitrary SDK payload content', async () => {
+  const h = harness({counts: [ok(2), ok('/private/document-name')]});
+  await assert.rejects(h.run(), error => {
+    assert.match(error.message, /page count changed expected=2 observed=invalid/);
+    assert.ok(!error.message.includes('/private/'));
+    return true;
+  });
+  assert.ok(!h.calls.some(call => Array.isArray(call) && call[0] === 'wait'));
 });
 test('replaced source/stale prefs fail at either native verification', async () => {
   const before = harness({validations: [new Error('source changed')]});

@@ -1,5 +1,37 @@
 # STATE — RTL Reader (updated 2026-10-16 by codex)
 
+## Latest: landscape interactions PASS; Edit handoff FAIL, recovered/released
+
+User accepted H11's known native relayout as the next baseline. H12 NEW6215944967
+on SAME installed89ddd40/exp10/code69/no reinstall PASS: direct/named links/Back,
+aligned English selection/verified own Copy, original bookmark/Back, ONE1.25zoom,
+small Pan/Fit. ONE activation/eleven current READY scenes; no native error/budget
+rejection. Fit/Close/native whole baseline exact; full original/annotation/copy/
+public/settings integrity PASS;36 captures cleaned/absence, RELEASE6216131210.
+
+H13 NEW6216175388 ONE Edit p.2 from initial native PAGE1 FAIL: SDK did not confirm
+requested page, handoff rejected, Edit prefs rolled back PAGE1, recovery UI. No
+retry/reopen/Return or pen. Normal Close SDK-verified PAGE1; native body/toolbar
+pixels exact, footer gains navigation-history controls (whole PNG not exact).
+All protected data/settings/packages exact;10 captures cleaned/absence, no stage;
+RELEASE6216295885. No device process;69 retained. Edit/Return NOT ready for use.
+
+Narrow offline correction in progress: one SDK jump, up to8 read-only confirmation
+observations/100ms between mismatches, rechecking exact document/count/prepared
+source each time; immediate failure for invalid response/count/source/document
+change, numeric-only failure evidence. Actual timer/callback regression RED on
+old helper, GREEN locally; actual SDK timing cause remains UNPROVEN by hardware.
+38 handoff cases,81 Node/generated tests plus66 actual lifecycle assertions,
+85407Core/all271mutations/native/Edit/v2/cross-layer/wiring6/provenance/package
+gates PASS. Independent two-file review and final identity/pin confirmation CLEAN;
+three independent defect variants rejected. Selected exp11/code70, UNBUILT and
+UNINSTALLED; exact clean-archive package/signature gate next, then exact new-package
+test approval.8 observations/seven100ms waits are NOT a wall-clock deadline for
+SDK/native promises. Reviewed helper8d15ceac...ffaf5e1;23-input PDFium aggregate
+unchanged and excludes helper/index/config, which require separate source hashes.
+Installed69 unchanged, no more unchanged69 hardware or speculative emulator work.
+Raw/copies/rollback preserved; no source/binary/private upload/timer/merge.
+
 ## Latest: same69 navigation/rotation PASS; final native-image mismatch, released
 
 User approved the remaining same-build no-pen smoke batch. H11 NEW6215242749,

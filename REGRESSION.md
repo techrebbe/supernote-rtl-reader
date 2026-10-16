@@ -1,5 +1,60 @@
 # RTL Reader hardware regression
 
+## 2026-10-16 — H12 interactions PASS; H13 left Edit FAIL with clean recovery
+
+User accepted H11's known native relayout as the next baseline and authorized
+remaining no-pen smoke on SAME installed89ddd40c4ec3f938010e5ba89836da271342d0ea /
+0.4.25-pdfium-exp10/code69; no reinstall. Actual device build/version and all raw
+evidence retained only in local metadata. Fresh exclusive reservation/preflight
+per trial; no original activation, root, firmware, scripts/external actions or pen.
+
+H12 NEW6215944967 PASS_BOUNDED_LANDSCAPE_INTERACTIONS:
+
+- ONE activation/eleven expected current READY scenes, no native error or raster
+  rejection. Direct original PAGE2 and named PAGE3 links; Back PNGs exact.
+- Original outline hierarchy/children retained. Chapter-three bookmark destination
+  whole PNG exact to named-link destination; Back exact first spread.
+- Visibly aligned English selection on the right original page; Copy reports its
+  own clipboard label/text readback verified. No arbitrary clipboard inspection.
+- ONE1.25zoom/current READY10, ONE small Pan moves content without page/chrome/new
+  raster generation change; normal Fit READY11/exact original reader PNG.
+- Normal SDK Close PAGE1/native whole baseline PNG exact. Rotation preferences
+  unchanged. Full original-PDF/annotation/copy/sidecar/public/package integrity
+  exact;36 regular/nonsymlink/local-backed captures cleaned/absence, no stage.
+  RELEASE6216131210. Local raw/copies/rollback retained. This is embedded English
+  selection, not OCR/Hebrew-extraction/all-PDF-actions/physical-feel/leak proof.
+
+H13 NEW6216175388 FAIL_EDIT_HANDOFF_RECOVERY_CLEAN:
+
+- Initial native PAGE1, settled RTL spread PAGE2left/PAGE1right. ONE Edit p.2 tap
+  saves Edit state then SDK page confirmation rejects: native reader did not
+  confirm the requested page. Edit prefs rollback PAGE1 succeeds; recovery UI
+  requires Close/reopen before reading. No second Edit or planned reopen/Return.
+- Normal displayed Close saves PAGE1 and SDK-verifies it. Native document/PAGE1/
+  landscape and page body+toolbar pixels exact. Footer adds navigation-history
+  controls; whole PNG not exact, no ad-hoc history clearing.
+- All originals/annotations/disposable copies/sidecar absence/public packages/
+  preferences/package/rollback exact.10 owned hash-backed regular/nonlink captures
+  removed/absence; no stage. RELEASE6216295885/no device process;69 retained.
+- A mistyped local preflight correlation argument was corrected before capture/
+  input/device writes. Its read-only metadata retained and marked invalid/closed;
+  actual issue reservation got a fresh full preflight before any capture/action.
+
+Hardware failure does not identify actual post-jump numeric page/count. Immediate
+read-before-navigation-settle is a hypothesis, not a proven device cause. Offline
+actual-helper callback/timer regression fails old source; bounded read-only
+confirmation correction is green (38 handoff cases;81 Node/generated checks plus
+66 actual lifecycle assertions).85407Core/all271mutations/native/Edit/v2/cross-
+layer/wiring6/provenance/package gates pass. Independent two-file correction and
+final identity/pin review CLEAN; legacy, omitted-revalidation and ninth-observation
+variants independently rejected. exp11/code70 selected unbuilt/uninstalled, exact
+clean-archive/signature gate next. No whole-call deadline claim:8 observations/
+seven100ms waits do not bound awaited SDK/native promises. Unchanged23-input
+PDFium aggregate excludes helper/index/config; separate reviewed source hashes
+and exact archive/bundle identity must supplement it. No new package or install
+yet. Do not repeat unchanged69 hardware or claim Edit/Return ready.
+No raw/private metadata/source/binary upload, timer resume or merge.
+
 ## 2026-10-16 — H11 same69 reading/rotation PASS; native terminal image differs
 
 User approved the remaining no-pen smoke batch on SAME installed

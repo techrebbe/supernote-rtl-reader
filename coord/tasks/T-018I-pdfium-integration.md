@@ -1,5 +1,34 @@
 # T018I — user-approved PDFium reader integration
 
+CURRENT H9 COMPLETE: approved NEW6208978942 exact c4b2891/exp9/code68 normally
+installed/ON/runtime verified. Bookmark/Back PASS; ONE1.25 zoom FAIL/shared policy.
+Numeric diagnostic PASS: new raster fits without existing charges; those charges
+are necessary to reject, but their owner/leak/OOM is not established. Explicit
+Fit/Close/exact reader/native/initial disposable scenes and source/annotation/
+copy/public/preferences integrity PASS.48 captures+1 stage removed/absence,
+RELEASE6209085429. Installed68 retained; device free, no hardware process.
+
+Next OFFLINE correction is concrete, not speculative: independent source audit
+and actual hook/generated scene/slot JSX/page RED regression confirm new poses
+can reach retiring old-token mounts before the passive scene effect. Both display
+branches now stamp controller revision; all3 slots block mismatches. Single/
+spread/child-layout/Fit/input regression GREEN and3 mutants rejected. No native
+cap/accounting/lease/writer/save/handoff change or proven H9-owner attribution.
+Identity exp10/code69 selected, unbuilt/uninstalled; full checks, independent
+review/identity and exact clean build/signing next. Prior68 pending approval notes
+are historical; do not repeat its completed trial or infer new install authority.
+No source/binary publication, timer resume or merge.
+
+Correction host gates PASS: integration7/166JS, destinations1/stream2, ELF8/one
+artifact-dependent skip,85407core/all271mutations/native-v2-Edit-crosslayer/
+provenance/packaging/wiring6. Actual generated scene regression rejects3mutants;
+independent production confirmation CLOSED. Final fallback/identity/pins and
+normal exact clean build/signature are still required; no extra emulator gate.
+
+Final independent13-file correction/fallback/identity/pin confirmation CLEAR;
+reviewed normalized23 aggregate f6597c45...341f217. Exact clean commit/package/
+signer verification next, then separately approved bounded hardware only.
+
 LATEST diagnostic68 exacte c4b2891864cc7d29ee9195ed4d3b24c1cb8fd927 normal exact
 archive build exit0/75 tasks; package/source/DEX/ELF/notices/bundle/same67 v2/v3
 signer and actual-APK provider11/no skips PASS. SNPLG71dbf7cd...bca97fe4, full

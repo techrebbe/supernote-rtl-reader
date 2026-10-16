@@ -33,7 +33,8 @@ class Integration(unittest.TestCase):
             app,index=generated(Path(temp))
             self.assertEqual(app.count('<InteractivePdfPage'),3)
             self.assertNotIn('<NativePdfPageView',app)
-            self.assertEqual(app.count('blocked={Boolean(fatalError)}'),3)
+            self.assertEqual(app.count('blocked={Boolean(fatalError) || display.pdfiumRevision !== pdfium.revision}'),3)
+            self.assertEqual(app.count('pdfiumRevision: pdfium.revision,'),2)
             for slot in ('single','left','right'):
                 self.assertIn('key={`'+slot+':${display.renderToken}`}',app)
             host=app[app.index('      <ReaderKeyView'):app.index("        {display.kind === 'spread'",app.index('      <ReaderKeyView'))]

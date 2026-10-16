@@ -1,5 +1,38 @@
 # Next useful hardware batch — no speculative test loop
 
+## Current: H9 consumed/released; correction69 source gate before new hardware
+
+Exact c4b2891/exp9/code68 installed/tested under6208978942. Numeric diagnostic
+PASS/new raster fits alone but existing charges needed for rejection; zoom FAIL,
+owner/leak unproven. Explicit Fit/Close/reader-native-initial scene/integrity PASS;
+48 captures+1 stage removed/absence; RELEASE6209085429. No active device process,
+device free; do not reuse ID or repeat unchanged68. Private data/raw remain local.
+
+Actual hook/generated scene/slot JSX/page RED regression establishes retiring
+display can dispatch new controller pose before passive scene effect. Revision
+stamps plus3-slot mismatch blocking correct that narrow defect, not all possible
+Android allocation ordering. Candidate exp10/code69 UNBUILT/UNINSTALLED; finish
+focused/full gates, independent correction/identity review, exact clean archive
+build/package/signature verification. No cap/accounting/writer/save/handoff edit.
+
+Earliest safe hardware is ONE controlled repetition of A's bookmark/Back/1.25
+zoom history under separately approved exact69 and a NEW exclusive reservation/
+preflight. Expected: no old-token new-pose render; matching-scene zoom READY/no
+error, then one small Pan/Fit only on success. Same terminal-error hard stop and
+explicit Fit/Close/integrity/owned cleanup/release if it fails; no second zoom or
+ad-hoc memory change. Reuse source references and retained68/67 rollback. No pen,
+original activation, root, firmware, source/binary upload, timer resume or merge.
+
+Correction host gates already PASS: integration7/166JS/85407core/all271mutations/
+destinations1/stream2/native-v2-Edit-crosslayer/provenance/packaging/wiring6.
+Independent production confirmation CLOSED; only final portable test fallback/
+identity/pins, exact clean package/signing and explicit69 hardware gate remain.
+Do not add speculative emulator prerequisites after those pass.
+
+Final independent13-file fallback/correction/identity confirmation CLEAR;
+reviewed normalized23 aggregate f6597c45...341f217. Exact clean build/signature
+is the remaining offline package gate; no existing reservation is reusable.
+
 ## Candidate ready: diagnostic68 exact build verified; scope approval pending
 
 Exact c4b2891864cc7d29ee9195ed4d3b24c1cb8fd927 / exp9/code68 normal build exit0/

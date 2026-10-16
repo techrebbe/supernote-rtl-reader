@@ -97,6 +97,13 @@ def patch_app(text):
     if (pdfiumSceneRef.current === scene) return; // Same-pair focus does not destroy selection.
     pdfiumSceneRef.current = scene;
     const token = ++renderTokenRef.current;''', 'scene admission')
+    # A controller mutation is rendered before this passive effect installs its
+    # new display/key. Never send its new pose to the retiring native mount.
+    for kind in ('single', 'spread'):
+        text = once(text, f"kind: '{kind}',\n" + ('        ' if kind == 'single' else '      ') + 'renderToken: token,',
+            f"kind: '{kind}',\n" + ('        ' if kind == 'single' else '      ') +
+            'pdfiumRevision: pdfium.revision,\n' + ('        ' if kind == 'single' else '      ') +
+            'renderToken: token,', kind+' controller revision')
     # This dependency tuple belongs to the generated foreground scene only.
     text = once(text, '    measuredPageWidth,\n  ]);\n\n  const handleNativeRendered',
         '    measuredPageWidth,\n    pageAreaLayout.height,\n    spreadSizing,\n    pdfium.owner,\n    pdfium.revision,\n    editBusy,\n    fatalError,\n  ]);\n\n  const handleNativeRendered', 'scene deps')
@@ -139,7 +146,7 @@ def patch_app(text):
         text = once(text, f'                  pageIndex={{display.{prop}}}' if slot!='single' else f'            pageIndex={{display.{prop}}}',
             f'                  page={{display.{prop}}}\n                  reader={{pdfium}} slot="{slot}" token={{display.renderToken}}\n'
             '                  width={measuredPageWidth} height={pageAreaLayout.height}\n'
-            '                  blocked={Boolean(fatalError)}\n'
+            '                  blocked={Boolean(fatalError) || display.pdfiumRevision !== pdfium.revision}\n'
             '                  inputBlocked={rendering || settingsOpen || jumpOpen || editBusy || pdfium.modal}', slot+' view')
     text = text.replace('onPdfRendered={event => handleNativeRendered(event, display.renderToken)}',
         'onRendered={event => handleNativeRendered(event, display.renderToken)}')

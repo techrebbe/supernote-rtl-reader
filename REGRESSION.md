@@ -1,5 +1,57 @@
 # RTL Reader hardware regression
 
+## 2026-10-16 — H9 diagnostic PASS; zoom FAIL; cleanup/release PASS
+
+User approved the bounded diagnostic. NEW6208978942 normally installed exact
+c4b2891864cc7d29ee9195ed4d3b24c1cb8fd927 /0.4.25-pdfium-exp9/code68, package
+71dbf7cdf93125f6f4fe61d4144d4cb1267ffb0cb0d3f9aef2ff8817bca97fe4,
+exact ON/runtime verified. Existing disposable A only; one valid source bookmark
+and Back PASS before ONE1.25 zoom. Same shared raster-budget rejection: zoom FAIL,
+Pan NOTPERFORMED. One correlated numeric snapshot proves source+new charge fits
+alone, while existing charges are necessary to reject. Their identity and any
+leak/OOM remain UNPROVEN; no memory limit raised. Private operands/raw stay local.
+
+Explicit Try Fit yielded fresh READY6 and exact initial reader PNG. Normal Close
+verified SDK page1/native-copy PNG; actual starting disposable PAGE2/full PNG
+exactly restored. Original PDFs/native annotations, retained disposable copies,
+public packages and rotation preferences exact.48 individually owned captures+
+1 staged package backed up/hash-verified, removed and absence verified. Raw,
+copies and rollback retained; installed68 retained. RELEASE6209085429, no active
+device process. Do not reuse reservation or repeat unchanged68's zoom.
+
+SOURCE-ONLY follow-up: independent review reproduced a concrete transition bug
+at60f6c07 with real Babel hook/page: new zoom pose reaches the retiring display
+before passive effect mints replacement key, then the new key dispatches it again.
+This does not prove H9's particular allocation ordering. Both generated displays
+now carry controller revision, all3 slots block mismatches plus fatal errors.
+Real generated effect/JSX/hook/page regression RED on old production source,
+GREEN after fix for single/spread, delayed effect, child layout, matching new key,
+modal input and explicit Fit; removing fence or either stamp fails (3 mutants).
+Caps/native accounting/stale/attachment/writer/save/handoff untouched. New identity
+exp10/code69 selected; full gates, independent correction confirmation and exact
+clean build/signing pending. No new package installed or source/binary uploaded.
+
+Local correction checks PASS: integration7,166JS (including actual single/spread
+transition and3 defect mutants), destinations1/28assertions/3mutants,
+stream2/87JNI+51Java/3mutants, ELF8/one built-artifact-dependent skip, core85407/
+all271mutations, native/v2/Edit/cross-layer/provenance/packaging/wiring6.
+Integration executes actual draw59/detach17/failure11/ledger14/diagnostic29 and
+11 compiled defect mutants. The normal-build JSX file now contains5 tests;
+explicit Git Bash interpreter form also passes. Two initial gate invocations
+found an unupdated candidate-identity expectation and missing local YAML path;
+scoped identity update/correct environment reruns PASS, no behavior gate weakened.
+Independent production correction confirmation CLOSED; final portable fallback/
+identity/pin confirmation pending. build.sh/native sources unchanged.
+
+Final independent13-file confirmation CLEAR: production and portable fallback
+findings CLOSED;6 actual-helper fallback scenarios, actual-JSX5/wiring6 PASS.
+Identity/pin reverse proofs verified; reviewed normalized23 source aggregate
+f6597c45607cde253d13eb67e803e69f691538d2fc7eb8e1955c010fe341f217.
+Test LF SHA256: bookmark_ui cf4ba46c22455f03ad92ecf5091e5a1f340afd413d6d9cd1a59056bd427f80c6;
+integration55188afaf38438c4342b9d3e3bf99f512f40aebcb46f01d0093f6bccfaa19030.
+Index/workflow-only reversals match exp9 exactly; no build/signing/SDK delta.
+Exact commit/clean package/signing is next, not an installed/device-fixed claim.
+
 ## 2026-10-16 — exact diagnostic68 built/verified, UNINSTALLED
 
 Source c4b2891864cc7d29ee9195ed4d3b24c1cb8fd927, 0.4.25-pdfium-exp9/code68,

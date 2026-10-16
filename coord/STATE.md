@@ -1,5 +1,45 @@
 # STATE — RTL Reader (updated 2026-10-16 by codex)
 
+## Current: diagnostic completed/released; concrete scene correction offline
+
+Approved H9 reservation6208978942 normally installed exact c4b2891/exp9/code68.
+Runtime/admission/valid original bookmark and Back PASS. ONE1.25 zoom FAIL on
+unchanged shared-budget policy. Numeric diagnostic PASS: source+new raster fits
+without existing charges, but existing charges are necessary for rejection.
+This does NOT identify their owner or establish a leak/OOM. Private operands/raw
+remain local. Explicit Try Fit READY/exact reader PNG, normal SDK Close/native
+PNG and actual initial disposable scene/full PNG PASS. Originals/annotations/
+copies/public packages/preferences exact;48 captures+1 stage removed/absence
+verified. RELEASE6209085429; installed68 retained, no active device process.
+No further unchanged68 hardware; device is free and unnecessary for source work.
+
+Independent source review confirmed an old-display/new-controller defect: the
+real zoom hook changes pose/revision before the passive App scene effect, so
+the old keyed slot can dispatch the new zoom and the replacement dispatches it
+again. H9 allocation ownership/causality remains unproven. Narrow correction
+stamps both generated displays with controller revision and blocks all3 retiring
+slots until their stamp matches. Actual hook/generated effect/slot JSX/page
+regression reproduced RED, now GREEN for single/spread, child layout, input-only
+modal and explicit Fit recovery;3 defect mutants rejected. Caps/native lease/
+stale/attachment guards, writer/save/handoff unchanged. Selected exp10/code69;
+focused/full checks, independent correction/identity confirmation and exact clean
+build/signing are next. UNBUILT/UNINSTALLED; prior pending68 notes below historical.
+No new hardware/publication/merge/timer authority inferred.
+
+Local correction gates PASS: integration7 (actual draw59/detach17/failure11/
+ledger14/diagnostic29 and11 compiled mutants),166JS including the new3 scene
+mutants, destinations1 (28 assertions/3 mutants), stream2 (87JNI+51Java/3mutants),
+ELF8/one artifact-dependent skip, core85407/all271mutations, native/v2/Edit/cross-
+layer/provenance/packaging/wiring6. Explicit Git Bash Python path form also5PASS.
+Independent production correction confirmation CLOSED; final fallback/identity/
+pin confirmation in progress. No host result substitutes for Android zoom.
+
+Final independent13-file confirmation CLEAR: interpreter fallback finding CLOSED
+(6 controlled scenarios); identity/pin reverse proofs and5 actual-JSX/6 wiring
+checks PASS. Reviewed normalized23 aggregate:
+f6597c45607cde253d13eb67e803e69f691538d2fc7eb8e1955c010fe341f217.
+Commit/exact clean build/signature verification next; no hardware PASS implied.
+
 ## Latest: exact diagnostic code68 built/verified; hardware approval pending
 
 Exact c4b2891864cc7d29ee9195ed4d3b24c1cb8fd927 / exp9/code68 normal clean-archive

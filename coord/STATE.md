@@ -1,5 +1,22 @@
 # STATE — RTL Reader (updated 2026-10-16 by codex)
 
+## Latest: exact diagnostic code68 built/verified; hardware approval pending
+
+Exact c4b2891864cc7d29ee9195ed4d3b24c1cb8fd927 / exp9/code68 normal clean-archive
+build exit0/75 tasks, normal JS28/full package/source/DEX/ELF/notices/bundle
+verification PASS. Finished-APK provider11 PASS/no skips; same retained67 v2/v3
+signer verified. SNPLG11144387bytes SHA71dbf7cdf93125f6f4fe61d4144d4cb1267ffb0cb0d3f9aef2ff8817bca97fe4.
+Reviewed normalized23 aggregate de66ece0...f7077a9 independently matches archive.
+Full identity in REGRESSION and local tmp/t018i-exp9-c4b2891-build1.
+
+Diagnostic ONLY, not a zoom fix. UNINSTALLED; installed67 not changed by offline
+work. User's one-shot diagnostic scope question remains pending; no reservation,
+device access or hardware result. Build/review/test work complete, no active
+process. Next real gate: explicit diagnostic task authority/free connected Nomad,
+NEW exclusive reservation/preflight, one exact reproduction/counter/explicit Fit/
+Close/integrity/owned-cleanup/release. No extra speculative offline prerequisite.
+Do not reuse H8R1/R2 IDs. No source/binary publication, timer resume or merge.
+
 ## Local next candidate: exp9/code68 numeric admission diagnostic, not a zoom fix
 
 Independent narrow source audit found no proven allocation/accounting defect:

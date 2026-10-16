@@ -1,5 +1,41 @@
 # RTL Reader hardware regression
 
+## 2026-10-16 — exact diagnostic68 built/verified, UNINSTALLED
+
+Source c4b2891864cc7d29ee9195ed4d3b24c1cb8fd927, 0.4.25-pdfium-exp9/code68,
+SDK0.1.65, same pluginID and package com.supernotertlreader. Normal exact clean
+archive build exit0/75 tasks, including JS/controller/actual-JSX28. Full normal
+package/source receipt/DEX/ELF/pinned engine/notices/bundle verification PASS;
+actual finished-APK provider11 PASS/no skips. Independent final13-file source/
+identity/pin confirmation CLEAR; source input aggregate matches after LF-only
+normalization, no bit-identical-build claim:
+de66ece06f9f106454dc6a1c99b6bccdfa9eb2ad7cb8ef885af66e646f7077a9.
+
+- SupernoteRtlReader.snplg: 11,144,387 bytes, SHA256
+  71dbf7cdf93125f6f4fe61d4144d4cb1267ffb0cb0d3f9aef2ff8817bca97fe4.
+- app.npk: 11,030,391 bytes, SHA256
+  deb6bdc9294c4a10b65a2f866f07217cf250ac190d2c2f6c66281582647695e6.
+- Bundle: 1,181,183 bytes, SHA256
+  e65cc80cac717c421beb32611c5247abda2264cc2a2a56527bba05c91ad256d7.
+- Same retained installed67 signer, v2/v3 verified:
+  fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c.
+- APK Android manifest remains1.0/code1/min27/target35; plugin identity is68.
+
+Integration7 with actual diagnostic29 assertions/stale mutant, native destinations1/
+stream2,164JS,85407core/all271mutations/native-v2-Edit-crosslayer/packaging/wiring6
+PASS. Earlier artifact-skipped provider gate is now run against the actual new
+APK with no skips; dependency/compiler deprecation warnings retained. Build and
+identity at tmp/t018i-exp9-c4b2891-build1, exact source archive and local review
+receipt retained. No active build/review/test/device process.
+
+This is a numeric admission diagnostic, NOT a zoom correction or root-cause
+result. UNINSTALLED; installed67 unchanged by offline work. Separate one-shot
+diagnostic question pending. No fresh hardware reservation or inferred approval,
+source/binary/private-metadata publication, timer resume or merge. Earliest next
+step is the proposed exact diagnostic under explicit task authority and a NEW
+reservation/preflight; no further speculative offline gate. Older unbuilt notes
+below are historical preparation stages, superseded by this completed build.
+
 ## 2026-10-16 — next diagnostic source prepared, no new device result
 
 Independent narrow audit of the code67 failure found no proven arithmetic,

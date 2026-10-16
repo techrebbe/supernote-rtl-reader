@@ -1,5 +1,13 @@
 # T018I — user-approved PDFium reader integration
 
+LATEST diagnostic68 exacte c4b2891864cc7d29ee9195ed4d3b24c1cb8fd927 normal exact
+archive build exit0/75 tasks; package/source/DEX/ELF/notices/bundle/same67 v2/v3
+signer and actual-APK provider11/no skips PASS. SNPLG71dbf7cd...bca97fe4, full
+identity in REGRESSION/local candidate-identity.json. Independent final review
+CLEAR/normalized23 de66ece0...f7077a9 matches. UNINSTALLED, one-shot diagnostic
+scope approval pending; no device reservation/process. No speculative repeat
+build/source loop or claim that zoom is fixed. Existing67/rollback/data intact.
+
 LOCAL next diagnostic exp9/code68: immutable snapshot of existing synchronized
 ledger-rejection operands; same predicate/caps/message/accounting, numeric native
 view/ticket/original scene-token correlation only. No guessed fix or private

@@ -1,5 +1,27 @@
 # Next useful hardware batch — no speculative test loop
 
+## Candidate ready: diagnostic68 exact build verified; scope approval pending
+
+Exact c4b2891864cc7d29ee9195ed4d3b24c1cb8fd927 / exp9/code68 normal build exit0/
+75tasks/package-source-DEX-ELF-notices-bundle PASS; actual-APK provider11/no skips,
+same retained67 v2/v3 signer. SNPLG SHA
+71dbf7cdf93125f6f4fe61d4144d4cb1267ffb0cb0d3f9aef2ff8817bca97fe4.
+Independent final review/source aggregate and focused/full existing gates PASS.
+UNINSTALLED, no device reservation/process. Pending user one-shot diagnostic
+approval/free current connection is the actual gate; no unchanged rebuild or
+speculative emulator/source loop. Preserve67 rollback/raw/copies/paused timers.
+
+On approval only: NEW exclusive reservation, exact preflight/normal manager
+same-ID upgrade/68ON/exact runtime. Reproduce the prior disposable A sequence
+(one valid bookmark/Back before ONE1.25 zoom) so allocation history is controlled.
+Read the new numeric tag alongside retained exact scene/runtime evidence; classify
+only the admission inequality, not a leak from usedBytes alone. Known rejection
+permits explicit Try Fit/Close only; stop other runtime/owner/source/page/paint/
+transport/ink/cleanup mismatch. Restore actual starting page/preferences, verify
+integrity, remove exact owned stage/captures/absence and release before any next
+experiment. No originals, pen, cap increase, root, firmware, source/binary upload
+or merge. Scope question is not installation authority until answered.
+
 ## Next concrete proposal: one numeric admission snapshot, approval pending
 
 Prepared exp9/code68 diagnostic-only source; not a zoom correction. Keep existing

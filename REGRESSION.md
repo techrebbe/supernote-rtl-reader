@@ -1,5 +1,44 @@
 # RTL Reader hardware regression
 
+## 2026-10-16 — code70 bounded left-page Edit/Return PASS; cleaned and released
+
+User explicitly approved exact70 installation/retest and complete reviewed
+23-authored-file branch publication. Published agent/page-turner-bridge at
+cb46352d19ca262853ae8e6537dedb5d15c57738; no merge. H14 NEW6216803737 exact
+preflight PASS, normal manager upgrade/ON and exact exp11 runtime verified.
+Executable abc8c879042b23a44001a504be352672cf31618a /
+0.4.25-pdfium-exp11/code70, SNPLG SHA256
+ac2a2b4b1ca0a83c17b1729307dd70e17f338767c4e4890ef375a1b8368aa70e.
+Unrooted Nomad3.30.45/API30; complete device build/identity/raw retained locally.
+Same verified signer and retained69 rollback; no other plug-in changes.
+
+- Existing synthetic disposable PAGE1 landscape; ONE initial activation and
+  settled PAGE2-left/PAGE1-right READY. ONE Edit p.2 saved the requested page
+  and opened the same native document at PAGE2, confirmed by SDK result/footer.
+- ONE normal RTL reopen: edit-return applied, nativePage2/readerPage2/Active p.2,
+  correct spread and current READY. Two exact activations/two READY scenes total;
+  no Edit/native/render/budget rejection. No second Edit, pen or annotation write.
+- ONE logical Prev restores PAGE1 and byte-identical initial reader PNG; normal
+  Close saves PAGE1 and SDK-verifies native PAGE1. Original rotation preferences
+  restored after the reversible landscape setup needed following manager use.
+- Native PAGE1/landscape page body and footer pixels exact. All33 observed native
+  toolbar states/bounds exact, but whole native PNG NOT identical: difference
+  confined to lower toolbar indicators, bounds(292,79,1761,94). No ad-hoc toolbar
+  or history mutation. Do not claim pixel-identical complete stock restoration.
+- Original PDFs/native annotations/disposable copies/sidecar absence/public
+  packages and retained candidate/rollback exact.68 capture files plus1 staged
+  installer individually verified regular/nonlink/local-hash-backed, removed and
+  absence verified. Local raws/copies/rollback retained. RELEASE6217363625;
+  no device/build/test/review process. Exact70 remains installed/enabled.
+
+Local receipt: tmp/t018ih14-exp11-6216803737-20261016/postflight.json and
+image-evidence.json. This closes the bounded no-pen left-page Edit/Return gate,
+not physical Bluetooth/new writing/tools/all-document/full-release acceptance,
+total-memory/leak proof or the exact cause of H13's earlier SDK failure. Existing
+69 reading evidence remains applicable only to unchanged paths; not rerun in H14.
+Saved ink stays PARKED. No original activation/root/firmware/raw/binary upload,
+timer resume or merge. Earlier pending/uninstalled notes below are historical.
+
 ## 2026-10-16 — exact reviewed SDK-confirmation code70 build/signature PASS
 
 Executable abc8c879042b23a44001a504be352672cf31618a /

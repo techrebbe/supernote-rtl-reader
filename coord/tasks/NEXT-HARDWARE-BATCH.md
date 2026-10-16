@@ -1,5 +1,29 @@
 # Next useful hardware batch — no speculative test loop
 
+## Completed: exact70 Edit/Return; next is alpha acceptance, not another offline cycle
+
+User approved exact70 install/one-shot retest and complete reviewed23-file source
+publication. Branch published cb46352d19ca262853ae8e6537dedb5d15c57738. H14
+NEW6216803737 normally installed exactabc8c87/exp11/code70 and verified ON/runtime.
+ONE Edit p.2 opened native PAGE2; ONE RTL reopen applied Edit/Return at PAGE2,
+correct active page/spread/READY. ONE Prev/exact reader PAGE1, normal SDK Close1.
+Full originals/annotations/copies/public/settings integrity PASS;68 captures+1
+stage cleaned/absence, RELEASE6217363625. Code70 retained,69 rollback/raw retained;
+no active process or additional hardware reservation.
+
+Native body/footer and33 toolbar control states/bounds exact; small lower-toolbar
+indicator raster variation means whole stock PNG is NOT exact. Evidence recorded,
+no ad-hoc toolbar/history changes. This is no-pen acceptance only, not new writing/
+tools/current-package physical Bluetooth/full-release or a proven H13 timing cause.
+
+Earliest next useful hardware gate: a short user reading/paired-turner/visible-feel
+acceptance on this SAME installed70, preserving originals; instrumented mutations
+or any disposable writing need an explicit separate scope and NEW exclusive
+reservation/preflight. No new build/emulator requirement and no unchanged H14
+repetition. User is not being asked to redraw or identify already-known key codes.
+Saved ink remains PARKED; no root/firmware/binary upload/timer/merge. Prior pending
+approval/uninstalled/preflight instructions below are historical, not live work.
+
 ## Earliest safe gate: exact reviewed/signed code70; task approval pending
 
 Executableabc8c879042b23a44001a504be352672cf31618a /exp11/code70 normal exact

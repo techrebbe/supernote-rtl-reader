@@ -1,5 +1,30 @@
 # STATE — RTL Reader (updated 2026-10-16 by codex)
 
+## Current: code70 installed; bounded Edit/Return PASS, device released
+
+Approved complete23-file source branch update published at cb46352d19ca262853ae8e6537dedb5d15c57738.
+Exact executableabc8c879042b23a44001a504be352672cf31618a /exp11/code70 normally
+installed/enabled on unrooted Nomad3.30.45/API30 under NEW6216803737. Exact package
+ac2a2b4b1ca0a83c17b1729307dd70e17f338767c4e4890ef375a1b8368aa70e/runtime,
+compatible signer/retained69 rollback and full preflight verified.
+
+ONE left Edit p.2 from settled PAGE2left/PAGE1right opened native PAGE2 of the
+same synthetic disposable PDF. ONE normal reopen applied edit-return at native/
+reader PAGE2/Active p.2, current READY. ONE Prev restored PAGE1/exact reader PNG;
+normal Close SDK-verified PAGE1. Two activations/two READY scenes, no error/pen.
+Original data/annotations/copies/public packages exact, rotation prefs restored.
+Native page body/footer exact and33 toolbar semantic controls exact; whole PNG
+NOT exact due to small lower-toolbar indicator raster difference only. Recorded,
+not silently waived or repaired.68 captures+1 stage cleaned/absence; local raw/
+copies/rollback retained. RELEASE6217363625, device free/no active process.
+
+Bounded no-pen Edit/Return gate CLOSED. Interactive reading alpha is installed;
+not a full release/merge, new pen/tool or current-package physical Bluetooth pass.
+Next useful acceptance is user reading/paired-turner/visible feel, plus separately
+scoped disposable writing only if requested. No speculative rebuild/emulator or
+repeat of completed H14. Saved ink PARKED. No raw/binary/private upload, root,
+firmware, timer resume or merge. Pending/uninstalled notes below are historical.
+
 ## Latest: reviewed SDK-confirmation code70 built/verified; exact retest pending
 
 Executable abc8c879042b23a44001a504be352672cf31618a /0.4.25-pdfium-exp11/code70

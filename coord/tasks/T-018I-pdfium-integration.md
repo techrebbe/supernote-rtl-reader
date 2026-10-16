@@ -1,5 +1,26 @@
 # T018I — user-approved PDFium reader integration
 
+CURRENT exactabc8c879042b23a44001a504be352672cf31618a /exp11/code70 installed/ON,
+package ac2a2b4b1ca0a83c17b1729307dd70e17f338767c4e4890ef375a1b8368aa70e.
+Approved complete23-file source update published cb46352d19ca262853ae8e6537dedb5d15c57738.
+H14 NEW6216803737 unrooted Nomad3.30.45/API30 PASS: ONE left-page Edit p.2 opens
+native PAGE2, ONE normal RTL reopen applies Edit/Return native/reader PAGE2,
+Active p.2/correct current spread READY. Two exact activations/two READY scenes,
+no error/rejection; ONE Prev restores exact PAGE1 reader PNG, normal SDK Close1.
+Native PAGE1/body/footer exact,33 toolbar states/bounds exact; whole native PNG
+NOT exact due to a small lower-toolbar indicator raster difference. No ad-hoc
+toolbar/history mutation. Full original/annotation/copy/public integrity and
+rotation prefs restored.68 captures+1 stage cleaned/absence; RELEASE6217363625,
+no device/build/test/review process.70 installed; raw/copies/69rollback retained.
+
+This closes ONE no-pen Edit/Return acceptance, not physical Bluetooth/new writing/
+tools/full-release/merge, complete-memory/leak proof, or H13 timing attribution.
+Next useful gate is user reading/paired-turner/visible-feel alpha acceptance on
+SAME70; no speculative build/emulator or unchanged Edit rerun prerequisite.
+Further instrumented hardware needs separate scope/NEW reservation/preflight.
+Saved ink PARKED; no originals/root/firmware/raw-binary upload/timer/merge.
+Earlier pending/uninstalled statements below describe historical checkpoints.
+
 LATEST exact executableabc8c879042b23a44001a504be352672cf31618a /exp11/code70
 reviewed CLEAN, normal clean-archive build exit0/75tasks/actualSDK+JS30, full
 package/source/DEX/ELF/notices/bundle and actual-APK provider11/no skips PASS.

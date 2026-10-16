@@ -1,5 +1,18 @@
 # T018I — user-approved PDFium reader integration
 
+LATEST exact executableabc8c879042b23a44001a504be352672cf31618a /exp11/code70
+reviewed CLEAN, normal clean-archive build exit0/75tasks/actualSDK+JS30, full
+package/source/DEX/ELF/notices/bundle and actual-APK provider11/no skips PASS.
+Same69/68 signer v2/v3 verified. SNPLG11144590bytes SHA
+ac2a2b4b1ca0a83c17b1729307dd70e17f338767c4e4890ef375a1b8368aa70e.
+Separate reviewed helper/index/workflow hashes match archive/check-out;23-input
+PDFium aggregate unchanged but excludes these handoff/identity inputs. Full local
+identity receipt retained. UNINSTALLED/no process; installed69 unchanged.
+Exact70 one-shot left-page SDK Edit/Return retest and13-file publication questions
+SENT/PENDING, fresh reservation/preflight required. No repeat unchanged build/
+review/emulator prerequisite, proven H13 timing cause, complete SDK time bound,
+raw/private/binary upload, timer or merge authority.
+
 LATEST user accepted H11 native relayout; SAME69 H12 landscape interaction smoke
 PASS under6215944967: direct/named links/Back, English selection/verified own Copy,
 original bookmark/Back,1.25zoom/Pan/Fit, exact reader/native restoration and full

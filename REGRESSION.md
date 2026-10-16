@@ -1,5 +1,43 @@
 # RTL Reader hardware regression
 
+## 2026-10-16 — exact reviewed SDK-confirmation code70 build/signature PASS
+
+Executable abc8c879042b23a44001a504be352672cf31618a /
+0.4.25-pdfium-exp11/code70, plug-in ID unchanged. Normal exact clean Git archive
+build exit0/75tasks, real pinned SDK0.1.65 and actual generated JSX/controller30
+PASS. Complete package/source-receipt/DEX/ELF/pinned-engine/notices/bundle gates
+PASS. Actual-APK provider11/no skips PASS (controlled native/Java ownership peers,
+not an Android-loader or hardware proof). Independent correction and final
+identity/pin review CLEAN. Handoff38/Edit42/actual lifecycle66,85407JavaCore/
+all271mutations/native/Edit/v2/cross-layer/wiring6/provenance/package checks PASS.
+
+- SNPLG:11144590bytes SHA256
+  ac2a2b4b1ca0a83c17b1729307dd70e17f338767c4e4890ef375a1b8368aa70e.
+- Internal APK:11030391bytes SHA256
+  62bceb1ab8e94b15409fadb98db105a40c2e900f6ea84a7187773deded666bd8.
+- Bundle:1181821bytes SHA256
+  a45872992ad6f2ab0b38f244bcb03fb16ed7c4b0a2c3a7f578fc7d22bf7f2527.
+- Package com.supernotertlreader; Android manifest1.0/code1/min27/target35.
+  v2/v3 signer SHA256
+  fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c,
+  independently checked against retained installed69 and68 APKs.
+- Runtime RTL_READER_OPEN v0.4.25-pdfium-exp11-native-reader-v2 present, plus new
+  numeric confirmation diagnostics. Source ZIP SHA256
+  2ac739920adacc64584126d6f0b7a358440feb76e14fa69b81682d68577e048d.
+-23-input PDFium normalized aggregate f6597c45...341f217 unchanged. It excludes
+  helper/index/config; separate independently reviewed helper8d15ceac...ffaf5e1,
+  test a9e9d99a...133e26, index d362a3fa...919a4 and workflow8f773bba...93255 hashes
+  match both exact archive and checkout. Version/config verified separately.
+  CRLF/LF source equivalence only; no bit-identical-build claim.
+
+Local full identity in tmp/t018i-exp11-abc8c87-build1/candidate-identity.json,
+package/raw/build logs retained. UNINSTALLED; installed69 unchanged; H13 remains
+FAIL and released. Exact70 one-shot left-page SDK Edit/Return installation/retest
+and scoped13-file publication questions sent/pending. No active device/build/test/
+review process, new hardware/root/firmware/cap/ink/emulator step, source/binary/
+private metadata upload, timer resume or merge. Hardware timing cause/fix remain
+unverified; bounded observations do not impose a deadline on awaited SDK calls.
+
 ## 2026-10-16 — H12 interactions PASS; H13 left Edit FAIL with clean recovery
 
 User accepted H11's known native relayout as the next baseline and authorized

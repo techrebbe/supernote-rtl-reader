@@ -1,5 +1,24 @@
 # STATE — RTL Reader (updated 2026-10-16 by codex)
 
+## Latest: reviewed SDK-confirmation code70 built/verified; exact retest pending
+
+Executable abc8c879042b23a44001a504be352672cf31618a /0.4.25-pdfium-exp11/code70
+normal exact clean-archive build exit0/75tasks; SDK and actual JSX/controller30,
+package/source/DEX/ELF/notices/bundle verification PASS. Actual-APK provider11 PASS,
+no skips. v2/v3 signer matches installed69/retained68. SNPLG11144590bytes SHA256
+ac2a2b4b1ca0a83c17b1729307dd70e17f338767c4e4890ef375a1b8368aa70e.
+Reviewed helper/index/workflow hashes separately match exact archive/check-out;
+unchanged23-input PDFium aggregate alone is not helper provenance. Full identity
+in REGRESSION/local candidate-identity.json. Independent correction/pin review CLEAN.
+
+UNINSTALLED; installed69 and released H13 data/evidence unchanged. Exact70 one-shot
+left-page SDK Edit/Return installation/retest and scoped13-file publication
+questions SENT/PENDING. No device/build/test/review process. Fresh reservation/
+exact preflight after approval; no extra speculative emulator/rebuild requirement.
+H13 actual timing cause and corrected hardware behavior still UNVERIFIED. Eight
+read observations are not an awaited-SDK whole-call deadline. No new device action,
+source/binary/private metadata upload, timer resume or merge.
+
 ## Latest: landscape interactions PASS; Edit handoff FAIL, recovered/released
 
 User accepted H11's known native relayout as the next baseline. H12 NEW6215944967

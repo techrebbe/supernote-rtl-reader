@@ -1,5 +1,27 @@
 # Next useful hardware batch — no speculative test loop
 
+## Earliest safe gate: exact reviewed/signed code70; task approval pending
+
+Executableabc8c879042b23a44001a504be352672cf31618a /exp11/code70 normal exact
+clean-archive build exit0/75tasks, actual SDK/JS30, complete source/package/DEX/
+ELF/notices/bundle and actual-APK provider11/no skips PASS. Same installed69/
+retained68 signer v2/v3 verified. Package SHA256
+ac2a2b4b1ca0a83c17b1729307dd70e17f338767c4e4890ef375a1b8368aa70e.
+UNINSTALLED; exact install/one-shot Edit/Return question SENT/PENDING. No process.
+
+After approval/current exclusive availability: NEW reservation, exact target/
+power/package/rollback/original-annotation-copy-public/preferences/footer preflight,
+normal manager upgrade/exact70 ON/runtime. Existing synthetic PAGE1 landscape,
+ONE initial activation/settled spread, ONE Edit p.2 (left) and require SDK/native
+PAGE2 confirmation; ONE normal RTL reopen must apply Edit/Return at native/reader
+PAGE2. Then one logical Prev to PAGE1, normal SDK Close/PAGE1, document/page/body/
+settings/integrity/owned stage-capture cleanup/absence/release. Native footer
+navigation history may differ; do not clear it ad hoc. Stop on failed/mismatched
+handoff or other source/page/render/transport/ink/cleanup uncertainty; normal
+Close recovery only. Preserve numeric failure evidence if it still fails.
+No pen/original activation/other-plugin/root/firmware/cap/emulator/ink expansion.
+Publication separately pending; no timer resume or merge. No unchanged69 retry.
+
 ## Current: interactive reading smoke PASS; Edit correction before new device work
 
 H11 native relayout explicitly accepted by user. Same installed89ddd40/exp10/code69

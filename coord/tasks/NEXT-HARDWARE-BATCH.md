@@ -1,5 +1,16 @@
 # Next useful hardware batch — no speculative test loop
 
+## Current unblock: transport for SAME already-approved code69
+
+Exact69 install/retest APPROVED. Fresh6212678033 H10 NOTPERFORMED at first failed
+connection/one offline-only ADB inventory/no USB, BEFORE any device preflight,
+capture/input/stage/install/source-integrity claim. RELEASE6212707673, no cleanup
+targets/process/current live state claim. Do not reuse reservation or repeatedly
+poll. Reconnect/unlock/debug-approve USB or provide current reachable Wi-Fi address;
+then NEW exclusive reservation/preflight for SAME reviewed/signed89ddd40/code69.
+No new unchanged build/review/package approval or emulator prerequisite. Existing
+copies/evidence/rollback preserved;69 remains uninstalled by this attempt.
+
 ## Earliest gate now: exact reviewed/signed code69; task approval pending
 
 Executable89ddd40c4ec3f938010e5ba89836da271342d0ea /exp10/code69 normal exact

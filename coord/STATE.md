@@ -1,5 +1,18 @@
 # STATE — RTL Reader (updated 2026-10-16 by codex)
 
+## Latest: code69 test APPROVED; H10 transport-blocked/released
+
+User approved exact69 installation/bounded retest. NEW6212678033 NOTPERFORMED:
+one connect to last verified transport failed, one ADB inventory only offline/no
+usable USB. Stopped before device preflight/capture/input/stage/install/source-
+integrity claim. No cleanup targets/current device-state claim; installed68 not
+changed by attempt. RELEASE6212707673/no active process. Do not reuse/poll ID.
+Actual unblock is USB reconnect/unlock/debug approval or current reachable Wi-Fi
+address; question sent. Then SAME approved exact89ddd40/code69 under NEW exclusive
+reservation/preflight, no unchanged rebuild/review/reapproval. No emulator build
+started: user feasibility question answered with partial-emulation limits, not
+treated as a broad implementation request or new prerequisite. Timers PAUSED.
+
 ## Latest: reviewed exact code69 built/verified; bounded retest approval pending
 
 Executable89ddd40c4ec3f938010e5ba89836da271342d0ea /0.4.25-pdfium-exp10/code69

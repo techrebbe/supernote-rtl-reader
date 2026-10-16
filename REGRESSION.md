@@ -1,5 +1,17 @@
 # RTL Reader hardware regression
 
+## 2026-10-16 — approved code69 H10 NOTPERFORMED; transport unavailable
+
+User explicitly APPROVED exact89ddd40/exp10/code69 bounded retest. Fresh exclusive
+6212678033 consumed at initial failed connection/one inventory with only offline
+endpoint/no USB. No device preflight/capture/input/stage/install/page/pen/source-
+integrity claim; no cleanup targets or newly verified device state. Code69 stays
+UNINSTALLED; installed68 unchanged by this attempt. RELEASE6212707673/no process.
+Reconnect USB or provide current reachable Wi-Fi address, then NEW reservation/
+exact preflight for SAME already-approved package. No unchanged rebuild/review/
+routine reapproval. Emulator feasibility discussed only; no new emulator started,
+device substitution claim, private metadata upload, timer resume or merge.
+
 ## 2026-10-16 — exact correction69 built/verified; not installed
 
 Exact executable89ddd40c4ec3f938010e5ba89836da271342d0ea /0.4.25-pdfium-exp10 /

@@ -1,5 +1,17 @@
 # Next useful hardware batch — no speculative test loop
 
+## Current physical unblock: known disposable footer; Wi-Fi already recovered
+
+NEW6214417871 H10R1 metadata/target/power/integrity/package preflight PASS, but
+native full-screen landscape hides filename/footer. NOTPERFORMED before screenshot/
+input/stage/install/activation. Postflight integrity/preferences exact,1 exact
+owned XML cleaned/absence, stage absent; RELEASE6214461102/no process.69 remains
+uninstalled. User asked to normally open existing synthetic disposable PAGE1
+portrait with filename/page bar visible. Then NEW reservation/preflight for SAME
+approved89ddd40/code69; no unchanged rebuild/review/reapproval or emulator gate.
+Wi-Fi verified, USB may disconnect. Never touch unknown/personal document to
+infer test identity; do not reuse reservation or bypass footer guard.
+
 ## Current unblock: transport for SAME already-approved code69
 
 Exact69 install/retest APPROVED. Fresh6212678033 H10 NOTPERFORMED at first failed

@@ -1,5 +1,13 @@
 # T018I — user-approved PDFium reader integration
 
+LATEST H10R1 NEW6214417871: USB/current Wi-Fi recovered; exact metadata/power/
+integrity/package/rollback preflight PASS. Native full-screen landscape hides
+filename/footer, disposable identity unknown. NOTPERFORMED before PNG/touch/page/
+stage/install/activation. Postflight integrity/preferences exact,1 owned local-
+backed XML removed/absence, no stage. RELEASE6214461102/no process;69 uninstalled.
+User asked for known disposable PAGE1 portrait/footer, then NEW reservation/
+preflight for SAME approved69. Wi-Fi verified/USB optional. No new offline gate.
+
 LATEST exact69 test APPROVED. NEW6212678033 H10 NOTPERFORMED at initial failed
 transport/one offline-only inventory/no USB, before preflight/capture/input/stage/
 install/current source-integrity claim. No cleanup targets; RELEASE6212707673.

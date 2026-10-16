@@ -1,5 +1,19 @@
 # STATE — RTL Reader (updated 2026-10-16 by codex)
 
+## Latest: Wi-Fi recovered; H10R1 stopped at unverified document, released
+
+User USB recovered exact target/current Wi-Fi ADB. NEW6214417871 metadata/power/
+package/rollback/source-original-annotation-copy-public preflight PASS. One guarded
+XML showed native full-screen landscape with hidden filename/footer; disposable
+identity unavailable. NOTPERFORMED before PNG/touch/page/stage/install/activation.
+Postflight originals/annotations/copies/public/preferences exact;1 locally backed
+owned XML removed/absence, stage absent/never created. RELEASE6214461102/no process.
+Code69 remains uninstalled; prior68 unchanged by attempt, not newly live-verified.
+User asked to normally open existing disposable fixture PAGE1 portrait with
+filename/page bar visible. Then NEW reservation/preflight for SAME approved69,
+no repeat package approval/build/review. Wi-Fi verified, USB may disconnect.
+No emulator implementation, pen/root/firmware/cap/publication/timer/merge action.
+
 ## Latest: code69 test APPROVED; H10 transport-blocked/released
 
 User approved exact69 installation/bounded retest. NEW6212678033 NOTPERFORMED:

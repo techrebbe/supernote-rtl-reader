@@ -1,5 +1,20 @@
 # RTL Reader hardware regression
 
+## 2026-10-16 — H10R1 NOTPERFORMED: current document could not be identified
+
+User USB recovered exact unrooted target and current Wi-Fi ADB. NEW6214417871
+metadata/power/original-annotation-copy-public/package/rollback preflight PASS.
+Native Document owner, but guarded hierarchy contained only full-screen landscape
+page surface/pageBar and no filename/footer. Active PDF not verified disposable.
+Stopped before PNG/touch/page/stage/install/activation; no69 runtime/zoom claim.
+No change to installed68 by attempt, not newly live-verified. Postflight exact
+originals/annotations/copies/public/preferences; unique locally backed XML removed/
+absence verified, stage absent/never created. RELEASE6214461102/no process.
+User must expose known disposable footer/PAGE1 portrait, then SAME approved exact
+89ddd40/code69 under NEW reservation/preflight. Wi-Fi verified, USB disconnect okay.
+Local metadata/XML retained; no extra build/review/emulator prerequisite or new
+source/binary/private metadata publication, timer resume or merge.
+
 ## 2026-10-16 — approved code69 H10 NOTPERFORMED; transport unavailable
 
 User explicitly APPROVED exact89ddd40/exp10/code69 bounded retest. Fresh exclusive

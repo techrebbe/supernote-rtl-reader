@@ -1,5 +1,25 @@
 # Next useful hardware batch — no speculative test loop
 
+## Current: navigation/rotation PASS; stop at native terminal-image mismatch
+
+Remaining same69 smoke scope APPROVED. First trial H11 NEW6215242749 used exact
+installed89ddd40/exp10/code69 without reinstall. Portrait logical turns, correct
+RTL spread pairing/logical turns and portrait return PASS/exact reader images;
+ONE activation/seven expected current READY scenes/no native error or rejection.
+Normal SDK Close PAGE1/native-copy PNG exact, saved rotation settings exact.
+Final original synthetic PAGE1 is landscape with verified identity, but native
+page scale/toolbar differ from starting PNG. Exact terminal-image restoration
+FAILED; cause not attributed. Stop invoked, no later interaction/Edit trial or
+ad-hoc native layout changes. Full original/annotation/copy/public integrity PASS;
+44 owned captures removed/absence, no stage; RELEASE6215507017/no process.
+
+Next decision is whether the known native relayout may be accepted as the next
+baseline, with exact document/page/preferences/integrity mandatory. Do not infer
+that exception from this note or silently downgrade the original hard stop.
+Then separately reserve embedded-fixture interactions and ONE supported SDK
+Edit/Return, SAME69/no reinstall. No new build/emulator prerequisite. Copies,
+raw and rollback retained; no physical Bluetooth/ink/leak/release acceptance.
+
 ## Current: portrait zoom gate PASS on installed69; next same-build smoke pending
 
 H10R3 NEW6214807371 exact89ddd40/exp10/code69 normal upgrade/ON/runtime PASS;

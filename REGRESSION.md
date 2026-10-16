@@ -1,5 +1,48 @@
 # RTL Reader hardware regression
 
+## 2026-10-16 — H11 same69 reading/rotation PASS; native terminal image differs
+
+User approved the remaining no-pen smoke batch on SAME installed
+89ddd40c4ec3f938010e5ba89836da271342d0ea /0.4.25-pdfium-exp10/code69,
+package67c1c8f4e59e4af58b0cebebbee85e86f3c99a9ad1a1f5db8edf8558024ed838.
+H11 NEW6215242749 exact identity/power/package/rollback/original/annotation/copy/
+public/preferences preflight PASS. Actual device build/version retained in local
+metadata; no reinstall or publication of private device/source metadata.
+
+- ONE exact activation; portrait PAGE1->2->1 reached current READY1/2/3 and
+  restored initial reader PNG exactly. Original-page identity/content checked
+  against independently rendered source references, not printed page numbers.
+- Landscape RTL PAGE1right/PAGE2left READY5, Next PAGE3right/PAGE4left READY6,
+  Prev READY7/first spread PNG exact. Both pages and complete toolbar visible.
+- Return to portrait READY9/initial reader PNG exact. Rotation produced retired
+  intermediate requests4/8 but only the expected current seven READY scenes;
+  no native error, raster budget rejection, crash or second activation observed.
+- Normal Close saved PAGE1 and used SDK-verified navigation; native disposable-
+  copy PAGE1 PNG exact to its pre-activation portrait baseline.
+- Original synthetic fixture reopened normally. Actual initial orientation was
+  landscape with auto rotation enabled. Saved auto/user preferences restored
+  exactly; original source/PAGE1/landscape verified. Final native toolbar/page
+  scale differ from starting screenshot. Exact initial whole-image restoration
+  FAILED; no cause attribution or annotation-loss claim. Hard stop honored:
+  no further fixture interactions, Edit/Return or ad-hoc layout manipulation.
+
+Local rotation guard initially rejected PluginHost's package-only window token
+before any settings write. A read-only owner/power/settings check established
+the exact expected awake PluginHost and unchanged preferences; only that local
+guard was corrected to accept package followed by slash OR closing brace,
+consistent with the existing capture guard. Production/build unchanged.
+
+Full original PDFs/native annotations/disposable copies/sidecar absence/public
+packages and retained package/rollback hashes exact.44 individually inventoried
+regular/nonsymlink/local-hash-backed remote captures removed, absence verified;
+no installer stage ever created. Local raw/screenshots/metadata/copies/rollback
+retained. RELEASE6215507017; no device/build/test process running. Installed69
+retained. Outcome READING_PASS_TERMINAL_VISUAL_RESTORE_MISMATCH, not complete
+smoke/release acceptance. Remaining embedded-fixture interactions and ONE supported
+SDK Edit/Return NOT RUN. Decision on accepting known native terminal relayout as
+the next baseline before new reservations; no unchanged rebuild or speculative
+emulator prerequisite. No pen, original activation, root/firmware, timer or merge.
+
 ## 2026-10-16 — H10R3 exact69 bounded zoom/Pan/Fit PASS, restored/released
 
 User approved exact89ddd40c4ec3f938010e5ba89836da271342d0ea /

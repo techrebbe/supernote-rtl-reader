@@ -1,5 +1,26 @@
 # STATE — RTL Reader (updated 2026-10-16 by codex)
 
+## Latest: same69 navigation/rotation PASS; final native-image mismatch, released
+
+User approved the remaining same-build no-pen smoke batch. H11 NEW6215242749,
+exact installed89ddd40/exp10/code69, no reinstall. Portrait PAGE1->2->1, RTL spread
+PAGE1right/PAGE2left->PAGE3right/PAGE4left->first pair, and return to portrait
+PASS; reader round-trip PNGs exact. ONE exact activation/seven current READY
+scenes, no native error or budget rejection. Normal Close SDK-verified PAGE1,
+native-copy PNG exact. Saved auto/user rotation preferences restored exactly.
+
+HARD STOP: after reopening the initial synthetic PAGE1 in landscape, the stock
+page scale/toolbar differs from the initial PNG. Correct document/page/orientation
+verified; exact initial whole-image restoration NOT established. Cause is not
+attributed to RTL or treated as annotation loss. No ad-hoc layout manipulation or
+later interaction/Edit trial. Full original/annotation/copy/public integrity PASS;
+44 exact regular/nonsymlink/local-backed captures cleaned/absence, no stage.
+RELEASE6215507017; no device/build/test process. Installed69 and local evidence/
+copies/rollback retained. Remaining fixture interactions and one SDK Edit/Return
+NOT RUN. Obtain a decision on accepting the known native terminal relayout as
+the next baseline before fresh reservations; do not rebuild unchanged69 or add
+speculative emulator work. No upload/timer/merge. Older pending notes historical.
+
 ## Latest: exact code69 installed; bounded portrait zoom gate PASS, released
 
 Approved H10R3 NEW6214807371 normally installed/enabled exact89ddd40/exp10/code69,

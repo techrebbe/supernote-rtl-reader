@@ -1,5 +1,19 @@
 # T018I — user-approved PDFium reader integration
 
+LATEST H11 NEW6215242749, remaining same69 smoke APPROVED; first navigation/
+rotation trial completed on exact installed89ddd40/exp10/code69/no reinstall.
+Portrait turns, RTL spread PAGE1right/PAGE2left->PAGE3right/PAGE4left->first pair,
+and portrait return PASS/exact reader round trips. ONE activation/seven current
+READY scenes/no native error or budget rejection. SDK Close PAGE1/native-copy
+PNG exact, saved rotation settings exact. HARD STOP at terminal synthetic native
+PAGE1 landscape: correct identity/page but page scale/toolbar differ from initial
+PNG; exact whole-image restoration NOT claimed, cause not attributed. No later
+interaction/Edit trials/ad-hoc layout changes. Full original/annotation/copy/
+public integrity PASS;44 local-backed exact captures cleaned/absence, no stage;
+RELEASE6215507017/no process.69/evidence/copies/rollback retained. Decision on
+known native terminal relayout as next baseline required before fresh trials.
+No unchanged rebuild/emulator or new publication/timer/merge action.
+
 LATEST H10R3 NEW6214807371 PASS_BOUNDED_ZOOM. Exact89ddd40/exp10/code69 normal
 upgrade/ON/exact runtime, ONE activation/five expected READY scenes. Disposable
 portrait admission, valid original bookmark/exact Back, ONE1.25 visible zoom

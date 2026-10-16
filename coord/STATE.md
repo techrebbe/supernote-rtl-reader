@@ -1,5 +1,23 @@
 # STATE — RTL Reader (updated 2026-10-16 by codex)
 
+## Latest: reviewed exact code69 built/verified; bounded retest approval pending
+
+Executable89ddd40c4ec3f938010e5ba89836da271342d0ea /0.4.25-pdfium-exp10/code69
+normal clean-archive build exit0/75tasks, actual JSX/controller30 and all package/
+source/DEX/ELF/notices/bundle gates PASS. Actual new-APK provider11 PASS/no skips;
+same installed68 signer verified v2/v3. SNPLG11144398bytes SHA
+67c1c8f4e59e4af58b0cebebbee85e86f3c99a9ad1a1f5db8edf8558024ed838.
+Reviewed normalized23 aggregate f6597c45...341f217 matches clean archive. Full
+identity in REGRESSION/local tmp/t018i-exp10-89ddd40-build1/candidate-identity.json.
+
+UNINSTALLED; installed68 and released H9 evidence unchanged. No active build/
+review/test/device process. Exact69 one-shot disposable bookmark/Back/zoom retest
+question sent, approval pending; then NEW exclusive reservation/exact preflight.
+Pan/Fit only on clean zoom; known rejection allows explicit Fit/Close/recovery
+only. No extra offline/emulator prerequisite. New source fence is proven, but
+Android zoom fix/charge ownership remain UNVERIFIED. No source/binary publication,
+private metadata upload, timer resume or merge. Earlier unbuilt text historical.
+
 ## Current: diagnostic completed/released; concrete scene correction offline
 
 Approved H9 reservation6208978942 normally installed exact c4b2891/exp9/code68.

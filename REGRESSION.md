@@ -1,5 +1,37 @@
 # RTL Reader hardware regression
 
+## 2026-10-16 — exact correction69 built/verified; not installed
+
+Exact executable89ddd40c4ec3f938010e5ba89836da271342d0ea /0.4.25-pdfium-exp10 /
+code69, SDK0.1.65, pluginID unchanged, package com.supernotertlreader. Normal
+clean-archive build exit0/75tasks, actual hook/JSX/controller30, complete normal
+package/source receipt/DEX/ELF/pinned-engine/notices/bundle verification PASS.
+Actual new-APK provider11 PASS/no skips. Same installed68 signer v2/v3 verified:
+fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c.
+Android manifest remains1.0/code1/min27/target35 (plugin version69).
+
+- SupernoteRtlReader.snplg11144398bytes SHA256
+  67c1c8f4e59e4af58b0cebebbee85e86f3c99a9ad1a1f5db8edf8558024ed838.
+- app.npk11030391bytes SHA256
+  634790b3c7539c773f0bc4d624253a80bdcc602cbb7a8c9ceb8d6135f050db29.
+- Bundle1181337bytes SHA256
+  e8d739e440c8ccacf45a4337545d5f4919eec622bcede6fa0601e4eaa7947e27.
+- Source ZIP SHA256 af195cf3432e4381b95e3855b174630e3564554fb42e67ea6e21f5c636a91770.
+
+All23 source inputs match independently reviewed working source after LF-only
+normalization: f6597c45607cde253d13eb67e803e69f691538d2fc7eb8e1955c010fe341f217.
+Raw archive aggregate e03c16de9a71114ba432ca68bd226a20515a69adbdb88d4655e080e3ad06c316;
+no bit-identical-build or Android zoom-resolution claim. Local exact archive,
+build log, package/signature/source receipt and review confirmation retained in
+tmp/t018i-exp10-89ddd40-build1 and adjacent local evidence. Prior85407core/271
+mutations/166JS/integration7 and existing safeguards PASS as recorded below.
+
+UNINSTALLED; installed68 unchanged, H9 released/clean. Exact69 task question sent
+for ONE controlled bookmark/Back/1.25zoom retest with new reservation/preflight,
+Pan/Fit only on success or explicit Fit/Close on known rejection, integrity and
+owned cleanup/release. Approval pending, no new device access. All useful offline
+package gates complete; no active process, source/binary upload or merge.
+
 ## 2026-10-16 — H9 diagnostic PASS; zoom FAIL; cleanup/release PASS
 
 User approved the bounded diagnostic. NEW6208978942 normally installed exact

@@ -1,5 +1,14 @@
 # T018I — user-approved PDFium reader integration
 
+LATEST exact89ddd40c4ec3f938010e5ba89836da271342d0ea /exp10/code69 normal clean-
+archive build exit0/75tasks, actualJSX/controller30, package/source/DEX/ELF/notices/
+bundle and same installed68 v2/v3 signer PASS. Actual new-APK provider11/no skips.
+SNPLG67c1c8f4...024ed838; reviewed normalized23 f6597c45...341f217 matches archive.
+Full identity REGRESSION/local receipt. UNINSTALLED/no active process; exact69
+bounded disposable bookmark/Back/zoom question sent/approval pending. NEW
+reservation/preflight required, no further speculative offline gate. Installed68,
+data/evidence/rollback intact. No source/binary publication, timer resume or merge.
+
 CURRENT H9 COMPLETE: approved NEW6208978942 exact c4b2891/exp9/code68 normally
 installed/ON/runtime verified. Bookmark/Back PASS; ONE1.25 zoom FAIL/shared policy.
 Numeric diagnostic PASS: new raster fits without existing charges; those charges

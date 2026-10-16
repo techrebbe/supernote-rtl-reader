@@ -1,5 +1,25 @@
 # Next useful hardware batch — no speculative test loop
 
+## Earliest gate now: exact reviewed/signed code69; task approval pending
+
+Executable89ddd40c4ec3f938010e5ba89836da271342d0ea /exp10/code69 normal exact
+clean-archive build exit0/75tasks/JS30, complete package/source/DEX/ELF/notices/
+bundle and same68 v2/v3 signer PASS. Actual-APK provider11/no skips; reviewed
+normalized23 f6597c45...341f217 matched. SNPLG SHA256
+67c1c8f4e59e4af58b0cebebbee85e86f3c99a9ad1a1f5db8edf8558024ed838.
+UNINSTALLED, installed68 unchanged; no active build/review/test/device process.
+
+Exact69 one-shot question sent, approval pending. On approval/current exclusive
+availability: NEW issue23 reservation/exact source/power/package/preferences/
+original/copy preflight, normal upgrade/ON/exact runtime, existing disposable A
+bookmark/Back then ONE1.25zoom. If clean READY/visible zoom, one small Pan/Fit;
+if same known budget failure, explicit Try Fit/Close only. Hard-stop other error/
+identity/source/page/transport/cleanup ambiguity. Restore actual initial scene/
+preferences, verify full integrity, individually clean owned stage/captures and
+absence, preserve raw/copies/68rollback, record outcome and release. No root,
+memory increase, pen/original activation/firmware/publication/timer/merge. All
+useful offline gates complete; do not invent more prerequisites while waiting.
+
 ## Current: H9 consumed/released; correction69 source gate before new hardware
 
 Exact c4b2891/exp9/code68 installed/tested under6208978942. Numeric diagnostic

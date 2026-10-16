@@ -1,4 +1,36 @@
-# STATE — RTL Reader (updated 2026-10-15 by codex)
+# STATE — RTL Reader (updated 2026-10-16 by codex)
+
+## Current: independent interaction review, corrected code67 candidate preparation
+
+User APPROVED independent review, corrected build and remaining bounded Nomad
+tests, stopping only at real blockers/required approval. No merge/publication
+authority inferred. Installed c40127d/exp7/code66 and all released hardware
+evidence remain unchanged; no current device reservation or access.
+
+Independent read-only exact7dafc717 review identified ONE P2: scene fatalError
+guard did not stop the real child onLayout request from retrying rejected zoom.
+Bookmark validation, detached-frame ownership and exact build pin had no other
+concrete finding. Correction propagates fatalError to all three blocked props
+and adds a volatile per-native-view terminal failure latch so a queued geometry
+transaction cannot beat React error publication. Existing explicit Try Fit
+clears pose and advances scene/key; only a fresh view can resume after failure.
+No raster/source limit, writer/save, native restart or global-key change.
+
+28 focused JS/controller/actual-JSX tests PASS; integration6 includes actual
+child-layout/native failure paths, 59 draw/17 detach/11 failure/14 ledger
+assertions and 10 compiled defect mutants. Identity selected exp8/code67, same
+pluginID/SDK0.1.65; marker/artifact-only frozen deltas reverse exactly to previous
+digests. Native/v2/Edit/cross-layer/provenance/packaging and wiring6 PASS.
+Correction exact-head independent confirmation and normal clean-archive package/
+signer verification are NEXT, not yet claimed. No new package installed.
+
+Earliest hardware: H8 exact reviewed/signed67 under NEW exclusive reservation,
+preflight, normal manager upgrade with retained66 rollback; disposable A bookmark
+availability/valid target/Back and ONE modest zoom/Pan/Fit. Stop any runtime/source/
+owner/cleanup mismatch, then normal recovery/integrity/owned cleanup/release.
+Remaining no-pen rotation/interactive/Edit smoke only under later fresh scope;
+physical Bluetooth input is not inferred from injected or host tests. Details
+NEXT-HARDWARE-BATCH.md. Saved ink PARKED/timers PAUSED/no root/firmware/merge.
 
 ## Current: approved remaining reading batch complete; device released
 

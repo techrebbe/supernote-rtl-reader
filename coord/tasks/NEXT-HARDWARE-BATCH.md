@@ -1,5 +1,40 @@
 # Next useful hardware batch — no speculative test loop
 
+## Approved continuation: exact code67 H8 correction gate, then remaining smoke
+
+User2026-10-16 approved independent review, corrected build and remaining Nomad
+tests. Initial7dafc717 source review found ONE P2: child layout could retry zoom
+behind fatal panel. Three-slot blocked props and native terminal failure latch
+correct that boundary; focused28/integration6 PASS. Exact correction/identity
+confirmation and clean-archive package/signing verification REQUIRED before use.
+Selected exp8/code67 is not yet built/installed; code66 rollback retained.
+
+H8 NEW exclusive issue23 reservation: exact package/source/version/hash/signer,
+ordinary unrooted shell/current owner/power/originals+native annotation+copies/
+public/preferences preflight. No other device workflow. If personal document,
+unexpected app/dialog, unavailable transport or power below threshold: stop before
+input/installation; report actual unblock, do not ad-hoc rescue. Only existing
+disposable copies/fixture may be opened. Normal manager same-ID upgrade, verify
+67 ON and exact runtime marker before one activation on retained copy A.
+
+Question: are unsupported bookmark rows disabled with children retained, valid
+bookmark/Back correct, and ONE modest1.25zoom/small Pan/Fit clean? Independently
+verify source target/visible content and runtime READY, not only UI page labels.
+Stop any native error/wrong source/page/paint/owner/ink/cleanup ambiguity. If the
+known budget error recurs, only observed explicit Try Fit recovery and normal
+Close are permitted; no second zoom/re-activation/cap raise. Then normal native
+page/starting synthetic recovery, original rotation preferences, full source/
+annotation/copies/public integrity and exact recorded owned scratch/stage removal,
+verify absence, retain raw/copies/rollback and release. Report PASS/FAIL/UNKNOWN.
+
+Only after H8 is recorded/released, later NEW reservations may run no-pen portrait/
+RTL-rotation navigation, embedded-fixture links/text/bookmark/zoom smoke and one
+supported SDK Edit/Return check on a disposable page. Preserve exact source/page/
+preferences; do not infer physical Bluetooth delivery from host/injected input.
+Physical paired-button confirmation, if still needed, is saved for user input.
+No originals activation/pen/root/firmware/global hooks/ink/timer/publication/merge.
+User continuation does not authorize uploading private metadata, raw or binaries.
+
 ## Current: approved H6/H6b/H7 complete; no next device action yet
 
 Unchanged installed c40127d/exp7/code66: unsupported bookmark UI affordance FAIL

@@ -1,5 +1,17 @@
 # T018I — user-approved PDFium reader integration
 
+CURRENT2026-10-16: user APPROVED independent review, corrected build and remaining
+bounded disposable Nomad tests. Read-only exact7dafc717 review found ONE P2 child-
+layout native retry behind fatal panel; no other concrete finding. Correction
+now blocks all three native slots on fatalError and latches native failed views
+until existing Try Fit creates a fresh keyed view. Actual child/native regressions
+PASS (focused28/integration6, four new failure mutants); package identity selected
+exp8/code67 with scoped marker/artifact-only reverse proofs. Native/v2/Edit/
+cross-layer/provenance/packaging/wiring PASS. Independent exact correction review,
+normal clean-archive build and signing are next; no new hardware access/install.
+Installed66/all retained copies/evidence remain intact. See latest STATE and
+NEXT-HARDWARE-BATCH for exact gates, not historical pending-approval text below.
+
 CURRENT remaining reading batch COMPLETE on unchanged c40127d/exp7/code66.
 H6 unsupported bookmark affordance FAIL/no invalid target activated. H6b valid
 original bookmark and exact Back PASS; one modest zoom emitted raster-budget

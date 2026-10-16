@@ -24,7 +24,7 @@ public final class PdfiumPageView extends View {
     private String spec;
     private JSONObject request;
     private volatile long revision;
-    private volatile boolean disposed,attached;
+    private volatile boolean disposed,attached,failed;
     private boolean ready,pressed,dragged;
     private Bitmap bitmap;
     private JSONObject model;
@@ -64,11 +64,11 @@ public final class PdfiumPageView extends View {
         }catch(Exception error){fail(revision,"Viewport request rejected");}
     }
     private boolean current(long ticket,String owner,String stamp){
-        return !disposed && attached && revision==ticket && request!=null &&
+        return !disposed && attached && !failed && revision==ticket && request!=null &&
             owner.equals(request.optString("sessionId")) && stamp.equals(request.optString("requestId"));
     }
     private void schedule(){
-        if(disposed || !attached || request==null || request.optBoolean("blocked",true) || getWidth()<=0 || getHeight()<=0)return;
+        if(disposed || !attached || failed || request==null || request.optBoolean("blocked",true) || getWidth()<=0 || getHeight()<=0)return;
         final JSONObject command=request;final long ticket=++revision,started=SystemClock.elapsedRealtime();
         final String owner=command.optString("sessionId"),stamp=command.optString("requestId");
         final int viewW=getWidth(),viewH=getHeight();
@@ -154,7 +154,10 @@ public final class PdfiumPageView extends View {
         if(!disposed && getId()!=NO_ID)((ThemedReactContext)getContext()).getJSModule(RCTEventEmitter.class).receiveEvent(getId(),"topPdfiumEvent",event);
     }
     private void fail(long ticket,String message){
-        if(disposed || revision!=ticket)return;ready=false;pressed=false;start=end=-1;selected="";
+        // A queued layout/property transaction may beat React's fatalError
+        // prop. Never retry a failed view; explicit Try Fit creates a new keyed
+        // native view after clearing the rejected pose and advancing the scene.
+        if(disposed || revision!=ticket || failed)return;failed=true;ready=false;pressed=false;start=end=-1;selected="";
         WritableMap event=packet("error");event.putString("message",message);emit(event);invalidate();
     }
     private void releaseFrame(){if(bitmap!=null){bitmap.recycle();bitmap=null;}if(lease!=null){lease.release();lease=null;}model=null;}

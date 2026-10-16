@@ -1,5 +1,40 @@
 # RTL Reader hardware regression
 
+## 2026-10-16 — independent correction review and code67 candidate preparation
+
+User approved the independent source review, corrected build and remaining
+bounded disposable-document tests. Installed code66 remains unchanged; no new
+device access or hardware pass. Independent reviewer inspected exact7dafc717
+against ded65ec8 read-only, without using our evidence conclusions as proof.
+
+ONE P2: fatalError stopped the parent scene effect, but the actual child onLayout
+could still produce a new requestId with the same rejected pose/token and
+blocked=false. Sticky panel did not prevent native retry. No other concrete
+bookmark, detached-frame, tests or build-wiring finding. Git Bash/Babel resolution
+and the exact five-line build-pin reverse delta independently verified.
+
+Correction now passes fatalError into all three native blocked props and latches
+current native failure until view replacement, closing the queued-geometry-before-
+React-publication window. Stale tickets cannot poison a current/fresh view; layout,
+same-view property commit or detach/reattach cannot clear the failure latch.
+Existing Try Fit clears pose and advances scene token, creating a fresh keyed
+view; no cap increase, source identity bypass, writer/save/restart or global hook.
+
+Focused JS/controller/actual JSX28 PASS. Integration6 PASS, including generated
+scene/error/explicit-recovery callbacks, actual child layout, actual native failure
+methods (11 assertions/4 compiled mutants), existing detach17/3 mutants,
+draw59/3 mutants and ledger/Fit14. Native/v2/Edit/cross-layer invariants,
+provenance/packaging fail-closed and package wiring6 PASS. One incorrect unittest
+CLI argument and one omitted workspace TEMP setting caused host-only invocation
+errors; corrected runs passed, no production change to conceal them.
+
+Selected identity 0.4.25-pdfium-exp8/code67, same pluginID/SDK0.1.65. Runtime
+marker and CI artifact label change ONLY from exp7 to exp8, each exact reverse
+replacement reproducing its previous frozen digest. Independent exact-head
+correction/identity confirmation, normal exact clean-archive package build and
+signature compatibility remain pending. Do not treat selected identity as a
+built/installed package or host lifetime evidence as a device zoom pass.
+
 ## 2026-10-15 — code66 remaining reading batch complete; two interaction findings
 
 Same installed c40127def19d515823890fdab57a256d36684530 /

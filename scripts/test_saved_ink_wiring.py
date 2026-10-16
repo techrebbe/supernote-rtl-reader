@@ -56,10 +56,10 @@ class WiringTests(unittest.TestCase):
         # authority. Preserved wiring/cleanup gates above and below still apply;
         # the PDFium integration separately asserts savedInkProfile is disabled.
         config = json.loads((ROOT / "PluginConfig.json").read_text(encoding="utf-8"))
-        self.assertEqual(config["versionName"], "0.4.25-pdfium-exp7")
-        self.assertEqual(config["versionCode"], "66")
+        self.assertEqual(config["versionName"], "0.4.25-pdfium-exp8")
+        self.assertEqual(config["versionCode"], "67")
         self.assertEqual(config["pluginID"], "snrtl20260726001")
-        self.assertIn("RTL_READER_OPEN v0.4.25-pdfium-exp7-native-reader-v2",
+        self.assertIn("RTL_READER_OPEN v0.4.25-pdfium-exp8-native-reader-v2",
                       (ROOT / "overlay/index.js").read_text(encoding="utf-8"))
         workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
         for gate in ("test_saved_ink.js", "test_saved_ink_app.js",

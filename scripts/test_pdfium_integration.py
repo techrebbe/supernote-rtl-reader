@@ -33,6 +33,9 @@ class Integration(unittest.TestCase):
             app,index=generated(Path(temp))
             self.assertEqual(app.count('<InteractivePdfPage'),3)
             self.assertNotIn('<NativePdfPageView',app)
+            self.assertEqual(app.count('blocked={Boolean(fatalError)}'),3)
+            for slot in ('single','left','right'):
+                self.assertIn('key={`'+slot+':${display.renderToken}`}',app)
             host=app[app.index('      <ReaderKeyView'):app.index("        {display.kind === 'spread'",app.index('      <ReaderKeyView'))]
             self.assertNotIn('panResponderRef.current.panHandlers',host)
             self.assertEqual(app.count('<View style={styles.blankPage} {...panResponderRef.current.panHandlers} />'),2)
@@ -224,7 +227,7 @@ class Request {
  boolean optBoolean(String name,boolean fallback){return false;}
 }
 class ActualPage extends Parent {
- long revision=8;boolean disposed,attached=true,ready=true,pressed=true;Frame bitmap=new Frame();
+ long revision=8;boolean disposed,attached=true,failed,ready=true,pressed=true;Frame bitmap=new Frame();
  Object model=new Object();Request request=new Request();PdfiumRasterLedger.Lease lease;
  int schedules;int getWidth(){return 100;}int getHeight(){return 140;}
  void schedule(){/*ACTUAL_SCHEDULE_ADMISSION*/ schedules++;}
@@ -290,6 +293,80 @@ public class DetachTest {
                 self.assertNotEqual(broken.returncode,0,label)
                 self.assertIn(failure,broken.stderr,label)
             print('3 compiled detach/frame/late-commit defect mutants rejected')
+
+    def test_native_failure_fences_geometry_before_react_error_props(self):
+        # Execute the production terminal-failure/admission methods. Layout and
+        # React publication ordering are controlled peers, not Android timing.
+        source=(ROOT/'native/PdfiumPageView.java.template').read_text(encoding='utf-8')
+        begin=source.index('    private boolean current(')
+        current=source[begin:source.index('    private void schedule()',begin)]
+        begin=source.index('    private void schedule(){')+len('    private void schedule(){')
+        admission=source[begin:source.index('        final JSONObject command=',begin)]
+        begin=source.index('    private void fail(long ticket,String message){')
+        failure=source[begin:source.index('    private void releaseFrame()',begin)]
+        begin=source.index('    private volatile boolean ')
+        flags=source[begin:source.index(';',begin)+1]
+        harness=r'''package test;
+class Request {
+ String optString(String name){return name.equals("sessionId")?"11":"stamp";}
+ boolean optBoolean(String name,boolean fallback){return false;}
+}
+class WritableMap {void putString(String key,String value){}}
+class ActualPage {
+ /*ACTUAL_FLAGS*/
+ long revision=8;boolean ready=true,pressed=true;int start=1,end=2;String selected="old";
+ Request request=new Request();int schedules,events,invalidations;
+ ActualPage(){attached=true;}
+ int getWidth(){return 600;}int getHeight(){return 900;}
+ void schedule(){/*ACTUAL_SCHEDULE_ADMISSION*/schedules++;}
+ WritableMap packet(String kind){return new WritableMap();}
+ void emit(WritableMap event){events++;}void invalidate(){invalidations++;}
+ void error(long ticket){fail(ticket,"budget");}
+ boolean accepts(){return current(revision,"11","stamp");}
+ void lateGeometry(){++revision;schedule();}
+ void replaceSameViewRequest(){request=new Request();++revision;schedule();}
+ void markDisposed(){disposed=true;}
+ boolean latched(){return failed;}
+ /*ACTUAL_CURRENT*/
+ /*ACTUAL_FAIL*/
+}
+public class FailureTest {
+ static int assertions;static void ok(boolean b,String label){if(!b)throw new AssertionError(label);assertions++;}
+ public static void main(String[] args){
+  ActualPage p=new ActualPage();p.error(7);
+  ok(!p.latched()&&p.ready&&p.events==0,"stale failure cannot poison current view");
+  p.error(8);ok(p.latched(),"current native failure latches before React props");
+  ok(!p.ready&&!p.pressed&&p.start==-1&&p.end==-1&&p.selected.isEmpty(),"failure fences interaction");
+  ok(p.events==1&&p.invalidations==1,"one current failure emitted");
+  ok(!p.accepts(),"failed view rejects current-stamp completion");
+  p.schedule();ok(p.schedules==0,"failed view refuses direct reschedule");
+  p.lateGeometry();ok(p.schedules==0&&!p.accepts(),"queued geometry cannot retry failed pose");
+  p.replaceSameViewRequest();ok(p.schedules==0&&!p.accepts(),"same-view property commit cannot clear latch");
+  p.error(p.revision);ok(p.events==1,"duplicate failures do not loop error layout");
+  ActualPage fresh=new ActualPage();fresh.error(7);
+  fresh.schedule();ok(!fresh.latched()&&fresh.accepts()&&fresh.schedules==1,"explicit fresh keyed view can render Fit");
+  p.markDisposed();p.error(p.revision);ok(p.events==1,"disposed old view cannot publish into new mount");
+  System.out.println(assertions+" actual failure/current/schedule assertions PASS (controlled peers)");
+ }
+}
+'''
+        home=Path(os.environ['JAVA_HOME'])/'bin';suffix='.exe' if os.name=='nt' else ''
+        with tempfile.TemporaryDirectory(prefix='pdfium-page-failure-') as temp:
+            java=Path(temp)/'FailureTest.java'
+            def run(guard=current,schedule=admission,fail=failure):
+                java.write_text(harness.replace('/*ACTUAL_FLAGS*/',flags).replace('/*ACTUAL_CURRENT*/',guard)
+                    .replace('/*ACTUAL_SCHEDULE_ADMISSION*/',schedule).replace('/*ACTUAL_FAIL*/',fail),encoding='utf-8')
+                subprocess.run([str(home/('javac'+suffix)),'-encoding','UTF-8','-d',temp,str(java)],check=True)
+                return subprocess.run([str(home/('java'+suffix)),'-cp',temp,'test.FailureTest'],capture_output=True,text=True)
+            correct=run();self.assertEqual(correct.returncode,0,correct.stderr);print(correct.stdout.strip())
+            for label,guard,schedule,fail,expected in (
+                ('missing latch',current,admission,failure.replace('failed=true;',''),'current native failure latches'),
+                ('retry after failure',current,admission.replace('failed || ',''),failure,'failed view refuses direct reschedule'),
+                ('stale completion after failure',current.replace('!failed && ',''),admission,failure,'failed view rejects current-stamp completion'),
+                ('stale failure poisons current view',current,admission,failure.replace('revision!=ticket || ',''),'stale failure cannot poison current view'),
+            ):
+                broken=run(guard,schedule,fail);self.assertNotEqual(broken.returncode,0,label);self.assertIn(expected,broken.stderr,label)
+            print('4 compiled native-failure/geometry/stale-ticket defect mutants rejected')
 
 
 if __name__=='__main__':

@@ -139,7 +139,7 @@ def patch_app(text):
         text = once(text, f'                  pageIndex={{display.{prop}}}' if slot!='single' else f'            pageIndex={{display.{prop}}}',
             f'                  page={{display.{prop}}}\n                  reader={{pdfium}} slot="{slot}" token={{display.renderToken}}\n'
             '                  width={measuredPageWidth} height={pageAreaLayout.height}\n'
-            '                  blocked={false}\n'
+            '                  blocked={Boolean(fatalError)}\n'
             '                  inputBlocked={rendering || settingsOpen || jumpOpen || editBusy || pdfium.modal}', slot+' view')
     text = text.replace('onPdfRendered={event => handleNativeRendered(event, display.renderToken)}',
         'onRendered={event => handleNativeRendered(event, display.renderToken)}')

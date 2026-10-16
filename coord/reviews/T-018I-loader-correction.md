@@ -1,5 +1,24 @@
 # T018I loader correction — independent source-only review
 
+## 2026-10-16 narrow interaction review — one P2, correction confirmation pending
+
+User explicitly approved independent review and continuation through corrected
+build/remaining bounded tests. Reviewer read only exact7dafc717 versus ded65ec8,
+no device/network/edits. ONE P2: parent fatal-error effect guard did not stop the
+actual child layout from scheduling the same rejected zoom behind the panel.
+No other concrete finding in bookmark validation, detached-frame ownership or
+build wiring/pin scope. Focused27/integration5 passed independently; source-only
+limits retained. Exact five-line build delta and Git Bash Babel resolution PASS.
+
+Correction propagates fatalError into three blocked props and adds a per-view
+volatile failure latch to native current/schedule/fail, preserving stale-ticket
+protection and requiring existing explicit Try Fit's fresh keyed mount. Actual
+child layout and native failed-view/new-view regressions added; focused28 and
+integration6 (11 failure assertions/4 new compiled mutants) PASS locally.
+Candidate identity exp8/code67 plus marker/artifact-only reverse-delta proofs.
+Independent exact-head correction/identity confirmation still PENDING; prior
+review's no-other-finding conclusion is not a new package or hardware acceptance.
+
 ## Completed code66 remaining reading evidence — not a new source review
 
 H6 unsupported bookmark row affordance FAIL; unsupported destination not tapped.

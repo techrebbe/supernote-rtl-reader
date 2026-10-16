@@ -1,5 +1,54 @@
 # RTL Reader hardware regression
 
+## 2026-10-16 — H10R3 exact69 bounded zoom/Pan/Fit PASS, restored/released
+
+User approved exact89ddd40c4ec3f938010e5ba89836da271342d0ea /
+0.4.25-pdfium-exp10/code69, package SHA256
+67c1c8f4e59e4af58b0cebebbee85e86f3c99a9ad1a1f5db8edf8558024ed838.
+NEW6214807371 exact identity/power/current owner/originals/annotations/copies/
+public packages/rotation/package/retained68 rollback preflight PASS. Exact device
+firmware/build remain recorded only in local metadata. Normal manager same-ID
+upgrade exact version/ON verified, ONE exact exp10 activation. Picker uses a
+custom ImageView radio without checked semantics: exact selected stage was
+visually verified and remote hash rechecked before normal Install; no other
+package selected. This was a host semantic-assumption correction, not a new
+permission, package change or device-failure bypass.
+
+- Original-PDF initial content/portrait scene exact versus retained source-checked
+  baseline; supported original bookmark target and Back exact. Unsupported parent
+  rows disabled, hierarchy/children retained; no invalid row tapped.
+- ONE1.25zoom reached READY4 with visible enlargement and no native error/shared
+  raster rejection. Retained PNG paper-width ratio matches1.25 within pixel bounds.
+- ONE actual finger Pan moved the page while chrome/page identity remained
+  unchanged; no new raster generation. Image comparison measures approximately
+  142px from nominal150px gesture. Initial integer150px assumption did not match:
+  native code applies sampled ACTION_MOVE deltas, not final ACTION_UP position.
+  Record measured movement, not exact pointer tracking or physical-feel proof.
+- Normal Fit reached READY5 and restored initial reader PNG byte-for-byte. Normal
+  Close saved logical page and SDK-verified handoff; native-copy whole PNG exact.
+- Actual initial synthetic PAGE1/current terminal whole PNG restored exactly.
+  Originals/native annotations/retained copies/public packages/rotation preferences
+  exact.62 individually inventoried local-backed captures+1 stage removed/absence
+  verified; local metadata/raw/image evidence/copies/rollback retained.
+
+Five distinct expected READY scenes retained across scoped runtime snapshots;
+no second activation/zoom, error/rejection or automatic recovery. Normal wake
+only for demonstrably sleeping expected task; a pre-Pan owner guard stopped
+BEFORE swipe, then exact zoom scene was reverified before ONE actual dispatch.
+No power settings, global server kill, root, firmware, cap, pen/original activation,
+other-plugin/source-binary-private metadata upload/timer/merge action.
+RELEASE6215163252/no process; installed69 retained. This closes the failing
+controlled portrait sequence, not all zoom/landscape/whole-book behavior or any
+total-memory/leak/H9-charge-owner proof. Remaining same-build no-pen interaction/
+rotation/SDK Edit-Return scope question sent/pending, no extra offline prerequisite.
+
+H10R2 NEW6214581758 was separately NOTPERFORMED before package selection/install:
+host ADB client/server handshake failed in normal picker. One ordinary inventory
+recovered existing server/transports without process kill/restart. Cleanup-only
+cancel/normal library restoration returned exact initial scene; integrity/
+preferences PASS;24 captures+1 stage removed/absence; RELEASE6214785111.
+H10R3 used a fresh reservation/preflight rather than continuing that failed setup.
+
 ## 2026-10-16 — H10R1 NOTPERFORMED: current document could not be identified
 
 User USB recovered exact unrooted target and current Wi-Fi ADB. NEW6214417871

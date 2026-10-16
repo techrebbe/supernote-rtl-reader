@@ -1,5 +1,18 @@
 # T018I — user-approved PDFium reader integration
 
+LATEST H10R3 NEW6214807371 PASS_BOUNDED_ZOOM. Exact89ddd40/exp10/code69 normal
+upgrade/ON/exact runtime, ONE activation/five expected READY scenes. Disposable
+portrait admission, valid original bookmark/exact Back, ONE1.25 visible zoom
+READY4/no error, ONE small Pan/unchanged chrome-page, Fit READY5/exact initial PNG,
+SDK Close/native-copy and initial synthetic whole scene exact PASS. Full original/
+annotation/copy/public/rotation integrity;62 captures+1 stage cleaned/absence.
+RELEASE6215163252/no process, installed69 retained; local raw/copies/rollback kept.
+One portrait scenario only; no whole-book/landscape/BT/physical-feel/leak/owner proof.
+Remaining SAME69 no-pen interaction/rotation/SDK Edit-Return scope question pending,
+fresh reservation/preflight per trial, no speculative emulator/build prerequisite.
+No new source/binary publication/timer/merge. H10R2 transport-blocked before install
+was independently restored/cleaned25files/released6214785111 before this fresh run.
+
 LATEST H10R1 NEW6214417871: USB/current Wi-Fi recovered; exact metadata/power/
 integrity/package/rollback preflight PASS. Native full-screen landscape hides
 filename/footer, disposable identity unknown. NOTPERFORMED before PNG/touch/page/

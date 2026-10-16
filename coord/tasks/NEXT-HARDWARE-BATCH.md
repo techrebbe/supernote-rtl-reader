@@ -1,5 +1,32 @@
 # Next useful hardware batch — no speculative test loop
 
+## Current: portrait zoom gate PASS on installed69; next same-build smoke pending
+
+H10R3 NEW6214807371 exact89ddd40/exp10/code69 normal upgrade/ON/runtime PASS;
+ONE activation/five READY scenes. Portrait original-PDF admission/bookmark/Back,
+ONE1.25 zoom/no rejection, ONE small Pan, Fit/exact reader, SDK Close/exact native
+and initial synthetic scenes PASS. Full integrity/rotation and62captures+1stage
+cleanup/absence; RELEASE6215163252/no process. Installed69 retained; do not repeat
+this completed one-shot zoom or reuse reservation. H10R2's interrupted setup was
+separately restored/cleaned25files/released6214785111 before this fresh trial.
+
+Remaining scope question SENT/PENDING for SAME69/no reinstall, disposable data:
+
+1. Portrait/RTL-spread logical navigation and rotation restoration on retained
+   representative copies; independent source references, current exact READY.
+2. Embedded fixture links/Back, selectable text/verified Copy, bookmarks and modest
+   zoom/Pan/Fit; original PDF unchanged, no scripts/external navigation or pen.
+3. ONE supported SDK Edit/Return handoff and reopen at the same chosen fixture
+   page, no writing/tool/annotation mutation or restart/private config route.
+
+Each separately bounded trial needs NEW exclusive reservation/exact preflight,
+predefined expected result and hard stops, actual initial scene/preferences and
+full integrity/owned scratch cleanup/absence/release before next. Stop first
+failure/unknown; do not stack recovery mutations or broaden into ink. Physical
+paired Bluetooth/e-ink feel not inferred from host/injected evidence; preserve
+existing input guards. No new build/review/emulator prerequisite for unchanged69.
+No source/binary/private metadata upload, root/firmware/cap/timer/merge authority.
+
 ## Current physical unblock: known disposable footer; Wi-Fi already recovered
 
 NEW6214417871 H10R1 metadata/target/power/integrity/package preflight PASS, but

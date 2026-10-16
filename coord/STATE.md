@@ -1,5 +1,32 @@
 # STATE — RTL Reader (updated 2026-10-16 by codex)
 
+## Latest: exact code69 installed; bounded portrait zoom gate PASS, released
+
+Approved H10R3 NEW6214807371 normally installed/enabled exact89ddd40/exp10/code69,
+same retained68 signer/package67c1c8f4...024ed838. ONE exact runtime activation/
+five expected READY scenes. Original-PDF admission/render, disabled unsupported
+bookmark rows/retained children, independently checked valid bookmark/exact Back,
+ONE1.25 visible zoom READY4/no rejection, ONE small Pan/same page/chrome, normal
+Fit READY5/exact initial reader PNG PASS. Normal SDK Close/native-copy whole PNG
+and actual initial synthetic PAGE1/current terminal whole PNG exact. Full source/
+original-annotation/copy/public/rotation integrity PASS.62 local-backed captures+
+1 stage removed/absence verified; RELEASE6215163252/no active process. Installed69
+retained; copies/rollback/raw local. Device free, Wi-Fi previously verified.
+
+This is ONE controlled portrait result, not whole-book/landscape acceptance,
+physical Bluetooth/e-ink feel, total-memory/leak proof or H9-owner attribution.
+Remaining SAME69 no-pen navigation/rotation, embedded-fixture interaction and SDK
+Edit/Return batch question SENT/PENDING; fresh reservation/preflight per trial,
+no new build/review/emulator prerequisite. No source/binary upload/timer/merge.
+
+Preceding H10R2 NEW6214581758 transport interruption before selection/install was
+NOTPERFORMED: one normal host inventory recovered existing ADB without kill;
+cleanup-only picker cancellation restored exact initial native scene, full
+integrity/preferences PASS,24 captures+1 uninstalled stage removed/absence.
+RELEASE6214785111. H10R3 was a fresh verified trial, not continuation across an
+unknown transport boundary. Normal wake only after proven asleep/expected task;
+no power settings or unlock bypass. Prior uninstalled/pending notes historical.
+
 ## Latest: Wi-Fi recovered; H10R1 stopped at unverified document, released
 
 User USB recovered exact target/current Wi-Fi ADB. NEW6214417871 metadata/power/

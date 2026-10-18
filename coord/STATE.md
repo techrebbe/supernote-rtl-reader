@@ -1,5 +1,25 @@
 # STATE — RTL Reader (updated 2026-10-18 by codex)
 
+## ACTIVE6252475180 — restarted H2R1 awaiting ONE portrait pinch
+
+User requested restart. Original H2 reservation6247578219 INTERRUPTED/UNKNOWN,
+not pinch PASS/FAIL: current library/later reader use invalidated the original
+activation boundary. Protected data/public/rotation checks exact; six owned
+captures removed/absence, no UI reset, RELEASE6252474425. Local evidence retained.
+
+NEW H2R1 reservation6252475180: exact target/power/protected-data/public/actual
+rotation preflight from known library PASS. Opened ONLY existing synthetic PAGE1
+normally, exact native footer verified. SAME71/no reinstall, one new activation/
+exact marker/nativePage1 readerPage1. Current layout PORTRAIT1404x1872. Observed
+Fit reset/current READY token2/pages1, Read/Fit, image exactly equals H1 Fit PNG.
+Human asked ONE modest two-finger spread in blank lower PAGE1, lift both, no
+rotation/page turn/repeat. Await reply; no observer/build/test process running.
+
+Then capture SAME activation/current scene/logs, assess intended page/one pinch-
+end reraster/no accidental navigation, Fit and normal Close/full integrity/owned
+cleanup/release. No stage/settings mutation, pen, originals, root, ink/timer/merge.
+Do not reuse either consumed H1 or old H2 cleanup/result boundaries.
+
 ## Current71 installed; portrait Fit/RTL taps/swipes PASS, released
 
 NEW6247387845 exact72d9a3e/exp12/code71 normal manager upgrade/ON/runtime PASS.

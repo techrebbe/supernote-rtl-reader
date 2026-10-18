@@ -1,5 +1,15 @@
 # Next useful hardware batch — no speculative test loop
 
+ACTIVE H2R1 reservation6252475180 after explicit user restart. Original6247578219
+INTERRUPTED/UNKNOWN, data/rotation exact, six owned captures cleaned/absence and
+RELEASE6252474425. New exact preflight/normal synthetic native PAGE1 open/one RTL
+activation/Fit reset PASS; SAME71, current READY token2/pages1, PORTRAIT/Read/Fit,
+exact H1 Fit image. Human asked ONE small two-finger spread in blank lower PAGE1,
+lift both/no repeat/rotation/page turn. Wait physical response; no observer process.
+Then same-activation scene/logs, intended page/one end reraster/no accidental
+navigation, Fit and normal Close/integrity/owned cleanup/release. No stage/install/
+settings/pen/ink work. H1 portrait PASS unchanged; old H2 never a pinch result.
+
 ## Next: SAME installed71, separately reserved human pinch/Fit
 
 Portrait gate PASS under6247387845/RELEASE6247515695: exact71 normal manager/ON,

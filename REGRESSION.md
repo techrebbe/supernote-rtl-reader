@@ -1,5 +1,23 @@
 # RTL Reader hardware regression
 
+## 2026-10-18 — original H2 INTERRUPTED/UNKNOWN; user-requested restart
+
+Reservation6247578219 set up same installed71 with one READY spread2,1 and asked
+for physical pinch. No completed controlled-gesture reply. User later requested
+restart; current normal file library/later reader use invalidated original runtime
+boundary. No inferred gesture delivery, crash cause, annotation loss, normal Close
+or exact original-scene restoration claim. No UI reset/input during termination.
+Protected original PDFs/annotations/disposable copies/public packages exact,
+expected marks absent, rotation prefs unchanged. SIX original-H2 regular/nonlink/
+hash-backed captures removed individually/absence verified, local evidence retained;
+RELEASE6252474425. No package/settings mutation or pinch PASS/FAIL promoted.
+
+NEW reservation6252475180 restarts same71 from known library under user request:
+exact preflight, normal synthetic native PAGE1/footer, one activation/marker,
+Read/Fit reset/current READY token2/pages1, portrait image exact H1 Fit. Physical
+ONE modest pinch still pending; no acceptance result. No observer process, pen,
+original activation, reinstall, root, raw/private/binary upload, timer or merge.
+
 ## 2026-10-18 — T019H1R1 ergonomic71 portrait PASS/released
 
 NEW6247387845, exact72d9a3e66a9bcb1e59df2690507dc5b2658090f5 /exp12/code71,

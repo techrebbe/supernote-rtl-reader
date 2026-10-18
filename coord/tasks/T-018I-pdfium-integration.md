@@ -1,5 +1,16 @@
 # T018I — user-approved PDFium reader integration
 
+CURRENT exact72d9a3e66a9bcb1e59df2690507dc5b2658090f5 /exp12/code71 built and
+verified clean-archive75tasks/SDK+JS32/full package/same70 signer/provider11/no
+skips PASS. SNPLG85b1a9670dd4b04e20a0b1e9fd4f149e0883ac61cbaf2fe0f99924870e9f3dd6;
+24-input reviewed aggregate exact; new TouchHost DEX/bundle present.112JS,
+Integration9,85407Core/all271mutations/invariants/wiring/package PASS; narrow
+review and final identity clear.20-file publication/same-five-note result updates
+approved. Exact71 portrait Fit/RTL taps/swipe and separately reserved real pinch/
+Fit APPROVED; current device availability/connection not yet confirmed. No device
+commands/reservation/install;71 UNINSTALLED,70 untouched. No active process,
+rebuild/emulator prerequisite, raw/binary publication, timer or merge.
+
 CURRENT2026-10-18 ergonomic feedback correction SOURCE ONLY, exp12/code71.
 White single Fit/no24px inset, corrected physical RTL taps; existing swipe/BT/
 SDK Edit/Return paths preserved. Page-owned pinch replaces +/-; Fit resets,

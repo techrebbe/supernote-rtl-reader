@@ -1,5 +1,18 @@
 # Next useful hardware batch — no speculative test loop
 
+## Ready71 gate: build/signature complete and approved; confirm availability
+
+Exact72d9a3e/exp12/code71 clean-archive normal build75tasks/SDK+JS32/full package/
+signer/provider11 PASS, reviewed24-input receipt exact. SNPLG SHA256
+85b1a9670dd4b04e20a0b1e9fd4f149e0883ac61cbaf2fe0f99924870e9f3dd6.
+User APPROVED exact installation and below bounded portrait Fit/RTL tap/swipe,
+then separately reserved real-finger pinch/Fit. Availability/connection question
+still outstanding; no current reservation, no device access or installation.
+Code70 rollback retained/same signer;71 UNINSTALLED. On explicit current free/
+connected confirmation, check issue23 exclusivity, reserve fresh, then exact
+preflight/known disposable footer before any capture/input/install. Stop unknown
+document/owner/ink/transport/cleanup, no ad-hoc rescue. Do not repeat offline gates.
+
 ## Next: reviewed ergonomic71, after exact package/signature and user approval
 
 Source-only user feedback batch: portrait/single white Fit/no inset, corrected

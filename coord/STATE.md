@@ -1,5 +1,22 @@
 # STATE — RTL Reader (updated 2026-10-18 by codex)
 
+## Current candidate71 built/verified; approved device tests await availability
+
+Exact72d9a3e66a9bcb1e59df2690507dc5b2658090f5 /exp12/code71 clean-archive normal
+build exit0/75tasks/SDK+JS32 and full package/source/DEX/ELF/engine/notices/bundle
+PASS. Actual-APK provider11/no skips,85407Core/all271mutations/package fail-closed
+PASS; Integration9/112JS/safety/wiring PASS. Independent review/final identity
+CLEAN, both P2s CLOSED. SNPLG85b1a9670dd4b04e20a0b1e9fd4f149e0883ac61cbaf2fe0f99924870e9f3dd6;
+v2/v3 signer matches70, rollback retained.24-input reviewed source aggregate exact.
+
+User approved20-file authored publication plus same-five-note build results and
+issue23 summary. Exact71 install/disposable portrait white Fit/RTL taps/swipe and
+separate real-finger pinch/Fit scopes APPROVED. Exclusive current availability/
+connection not yet confirmed, so no reservation/device commands/installation.
+71 UNINSTALLED,70 untouched; no active build/test/review process. Prepare next
+bounded gate, no unchanged rebuild/review/emulator loop. Physical fingers needed
+only for pinch. Originals/annotations untouched; saved ink PARKED; no timer/merge.
+
 ## Current source: user ergonomic feedback corrected; exact71 build gate next
 
 User reports portrait gray/non-native Fit, reversed RTL taps and requests pinch.

@@ -1,5 +1,35 @@
 # RTL Reader hardware regression
 
+## 2026-10-18 — exact ergonomic71 package/signature PASS; device gate pending
+
+Executable72d9a3e66a9bcb1e59df2690507dc5b2658090f5 /0.4.25-pdfium-exp12/code71
+normal clean Git archive build exit0/75tasks; real SDK0.1.65/actual JSX-hook32
+and package/source/DEX/ELF/engine/notices/bundle checks PASS. New reader-only
+TouchHost is copied/registered/present in DEX/bundle, source receipt has24 inputs;
+independently reviewed normalized aggregate matches exact archive and checkout.
+Actual finished-APK provider11/no skips PASS. Core85407/all271mutations/package
+fail-closed PASS; focused Integration9 and combined112JS plus safety/wiring gates
+PASS. Independent source/correction/final identity review CLEAN; two P2s CLOSED.
+
+- SNPLG11147999bytes SHA256
+  85b1a9670dd4b04e20a0b1e9fd4f149e0883ac61cbaf2fe0f99924870e9f3dd6.
+- Internal APK11030391bytes SHA256
+  d5a59d5c1f190d31c5bb2507b03572e7c4a6e8fbfe77cf20d92ae70efeb7c051.
+- Bundle1182784bytes SHA256
+  d1bb7a1c244f0d616a07adc6d09cca3ad8d38b4fb5bc1d61b634e666b6786921.
+- Package com.supernotertlreader; manifest1.0/code1/min27/target35; plugin71.
+  v2/v3 signer fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c
+  verified against retained70. Source ZIP67d291655b7dc9dc5dd696c2821cde31c1e93ed0c0e9d7179f2933c1f009c233.
+
+Local receipt tmp/t019-exp12-72d9a3e-build1/candidate-identity.json; binaries/raw
+retained locally, not published. User approved20 reviewed authored files plus
+result notes in these same five evidence files/issue23 summary; no merge. Exact71
+installation/portrait Fit-RTL-tap-swipe and later separately reserved human pinch/
+Fit scopes APPROVED. Current exclusive device availability/connection still
+awaits confirmation;71 UNINSTALLED, no device commands/reservation or active build.
+No claim of real Android pinch/PDFium rotated-anchor/physical-feel/target-memory
+pass. Installed70 and all originals/annotations untouched; saved ink PARKED.
+
 ## 2026-10-18 — user reading feedback: ergonomic correction, SOURCE ONLY
 
 Selected0.4.25-pdfium-exp12/code71. Single-page Fit uses the available viewport

@@ -1,5 +1,14 @@
 # T018I — user-approved PDFium reader integration
 
+CURRENT H2R16252475180 physical pinch FAIL: SAME71/one reported portrait gesture,
+one bounded-bitmap zoom rejection, no zoom READY/anchor/feel PASS, no retry. ONE
+Try Fit restored exact reader PAGE1/current READY4; normal Close/native whole PNG
+exact. Protected data/public/rotation exact,26 captures cleaned/absence; RELEASE
+6252663180,71 ON/no process. User-requested Wi-Fi ADB verified/left on; USB free.
+Next SOURCE-ONLY narrow pinch-to-budget correction retaining caps/ledger, not an
+extra device gesture. Exact factor/threshold unknown; later reviewed exact signed
+candidate/new approval/reservation required. H1 PASS valid; ink/timer/merge parked.
+
 CURRENT hardware6247387845 exact72d9a3e/exp12/code71 normal manager/ON/runtime PASS.
 Portrait full white Fit, physical RTL taps1to2to1 and unchanged swipes1to2to1 PASS;
 one activation/five READY/no native-render-budget error. Reader and native PAGE1

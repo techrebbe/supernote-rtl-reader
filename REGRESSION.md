@@ -1,5 +1,27 @@
 # RTL Reader hardware regression
 
+## 2026-10-18 — H2R1 pinch FAIL/budget rejection; recovery/cleanup PASS
+
+Reservation6252475180, SAME executable72d9a3e66a9bcb1e59df2690507dc5b2658090f5
+/exp12/code71, no reinstall. One user-reported completed portrait pinch on the
+synthetic PAGE1 produced ONE same-activation native page/zoom error: Requested
+zoom exceeds the bounded bitmap budget. No zoom READY/focal-anchor/feel PASS;
+no repeated gesture, seam/blank-start or other follow-on. Exact factor and which
+per-frame arithmetic threshold were not captured; do not infer a heap leak/OOM.
+
+ONE observed Try Fit restored exact initial reader PAGE1 PNG/current READY4.
+Normal Close SDK-verified PAGE1 and native whole PNG exactly equals start. All
+protected original PDFs/native annotations/disposable copies/public packages
+exact, expected marks absent, actual rotation prefs unchanged.26 regular/nonlink/
+hash-backed capture files removed individually/absence verified; no stage, local
+raw/copies/candidate/70rollback retained. RELEASE6252663180,71 ON/no test process.
+
+User additionally requested Wi-Fi ADB. Ordinary port5555 enabled; exact target/
+firmware/UID2000 verified wirelessly, USB may disconnect. Address/serial/receipt
+kept local; Wi-Fi remains enabled as requested. No root/firmware/raw/private/binary
+upload, timer resume or merge. Next source-only pinch/budget handling correction,
+not more gestures or raised memory caps. H1 portrait Fit/RTL tap/swipe PASS valid.
+
 ## 2026-10-18 — original H2 INTERRUPTED/UNKNOWN; user-requested restart
 
 Reservation6247578219 set up same installed71 with one READY spread2,1 and asked

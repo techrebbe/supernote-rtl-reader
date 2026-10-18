@@ -1,24 +1,24 @@
 # STATE — RTL Reader (updated 2026-10-18 by codex)
 
-## ACTIVE6252475180 — restarted H2R1 awaiting ONE portrait pinch
+## Current: pinch budget rejection safely recovered; RELEASE6252663180
 
-User requested restart. Original H2 reservation6247578219 INTERRUPTED/UNKNOWN,
-not pinch PASS/FAIL: current library/later reader use invalidated the original
-activation boundary. Protected data/public/rotation checks exact; six owned
-captures removed/absence, no UI reset, RELEASE6252474425. Local evidence retained.
+H2R1 reservation6252475180/SAME72d9a3e/exp12/code71: user completed ONE portrait
+pinch, same activation records ONE native page/zoom bounded-bitmap rejection.
+FAIL, no zoom READY/focal-anchor/feel PASS, retry or seam/blank-start follow-on.
+ONE observed Try Fit restored exact initial reader PAGE1 PNG/current READY4;
+normal Close SDK-verified PAGE1/native whole PNG exact. Protected originals/native
+annotations/disposable copies/public packages exact, marks absent, rotation prefs
+unchanged.26 owned regular/nonlink/hash-backed captures removed/absence verified,
+no stage/reinstall, local raw/copies/candidate/70rollback retained.71 stays ON.
 
-NEW H2R1 reservation6252475180: exact target/power/protected-data/public/actual
-rotation preflight from known library PASS. Opened ONLY existing synthetic PAGE1
-normally, exact native footer verified. SAME71/no reinstall, one new activation/
-exact marker/nativePage1 readerPage1. Current layout PORTRAIT1404x1872. Observed
-Fit reset/current READY token2/pages1, Read/Fit, image exactly equals H1 Fit PNG.
-Human asked ONE modest two-finger spread in blank lower PAGE1, lift both, no
-rotation/page turn/repeat. Await reply; no observer/build/test process running.
-
-Then capture SAME activation/current scene/logs, assess intended page/one pinch-
-end reraster/no accidental navigation, Fit and normal Close/full integrity/owned
-cleanup/release. No stage/settings mutation, pen, originals, root, ink/timer/merge.
-Do not reuse either consumed H1 or old H2 cleanup/result boundaries.
+User explicitly requested Wi-Fi ADB: exact current target/firmware/UID2000 verified
+over WLAN, ordinary port5555 enabled/left on as requested; USB may disconnect.
+Private address/transport receipt local only. No device/build/test/review process.
+Next SOURCE-ONLY narrow pinch-to-existing-raster-budget handling; preserve all
+memory/ledger gates, not a bigger budget or another gesture probe. Exact physical
+factor/which arithmetic threshold UNVERIFIED. Later hardware needs corrected
+reviewed exact compatible package/new approval/reservation. H1 portrait Fit/tap/
+swipe PASS unaffected; ink PARKED/timer PAUSED/no merge. Earlier pending text stale.
 
 ## Current71 installed; portrait Fit/RTL taps/swipes PASS, released
 

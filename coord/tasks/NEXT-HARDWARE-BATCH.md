@@ -1,14 +1,14 @@
 # Next useful hardware batch — no speculative test loop
 
-ACTIVE H2R1 reservation6252475180 after explicit user restart. Original6247578219
-INTERRUPTED/UNKNOWN, data/rotation exact, six owned captures cleaned/absence and
-RELEASE6252474425. New exact preflight/normal synthetic native PAGE1 open/one RTL
-activation/Fit reset PASS; SAME71, current READY token2/pages1, PORTRAIT/Read/Fit,
-exact H1 Fit image. Human asked ONE small two-finger spread in blank lower PAGE1,
-lift both/no repeat/rotation/page turn. Wait physical response; no observer process.
-Then same-activation scene/logs, intended page/one end reraster/no accidental
-navigation, Fit and normal Close/integrity/owned cleanup/release. No stage/install/
-settings/pen/ink work. H1 portrait PASS unchanged; old H2 never a pinch result.
+H2R1 reservation6252475180 COMPLETE/FAIL: ONE reported portrait pinch caused one
+bounded-bitmap zoom rejection, not a zoom/anchor/feel PASS. Try Fit restored exact
+reader PAGE1/current READY4; normal Close/native whole PNG and protected-data/
+public/rotation integrity PASS.26 owned captures cleaned/absence; RELEASE6252663180,
+71 retained/ON/no process. User-requested Wi-Fi ADB verified/left enabled, USB free.
+NO more gesture/seam/blank-start trial on71. Next narrow SOURCE-ONLY budget-aware
+pinch correction retaining existing caps/ledger, focused tests/review/exact signed
+package, then NEW approval/reservation. Exact physical factor/threshold unknown.
+H1 Fit/taps/swipes remain PASS; ink/timer/merge remain out of scope.
 
 ## Next: SAME installed71, separately reserved human pinch/Fit
 

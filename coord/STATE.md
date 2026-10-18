@@ -1,4 +1,23 @@
-# STATE — RTL Reader (updated 2026-10-16 by codex)
+# STATE — RTL Reader (updated 2026-10-18 by codex)
+
+## Current source: user ergonomic feedback corrected; exact71 build gate next
+
+User reports portrait gray/non-native Fit, reversed RTL taps and requests pinch.
+Local exp12/code71: white page-view background/no inset in single Fit; physical
+RTL left=next/right=previous, unchanged swipes/BT; page-owned pinch replaces +/-
+with Fit retained. Pinch ends in one guarded reraster, preserves PDF-space focal
+anchor, cancels stale/extra-pointer/blank-start contacts; no writer/save changes.
+Two independent-review P2s corrected/confirmed CLOSED (cross-edge swipe fraction
+ordering and sticky blank multi-touch cancellation); no critical/high remaining.
+Integration9,112JS, native/v2/cross-layer/Edit/wiring6 PASS.24-input normalized
+aggregate3c142c2c532181a12915685a2fc448140cd1a9c70257d1f2bc4cbbb796802be4
+independently confirmed; identity pins scoped to marker/artifact label only.
+
+71 UNBUILT/UNINSTALLED at this source checkpoint; normal exact clean build/
+signer/package gate next. Installed70 untouched, no device access/publication/
+timer/merge. Hardware requires exact candidate approval/NEW reservation; first
+synthetic disposable portrait Fit/RTL taps/swipe, then a real two-finger pinch
+acceptance (physical input needed only then). Saved ink PARKED. No emulator loop.
 
 ## Current: code70 installed; bounded Edit/Return PASS, device released
 

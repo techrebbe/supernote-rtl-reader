@@ -150,6 +150,38 @@ test('zoom after navigation uses authoritative original page, not old focused st
   h.packet(spec,{kind:'rendered',scale:2,fromLeft:44,fromTop:738});h.reader.zoom(1.25);h.render();
   assert.equal(h.reader.poses.current.get(2).scale,2.5);assert.equal(h.reader.poses.current.has(0),false);await h.unmount();
 });
+
+test('pinch reuses original-page XYZ mapping, touches only its page and clears selection',async()=>{
+  const h=harness();await h.reader.open(context);h.render();const spec=h.spec(1);h.bind(spec);
+  h.packet(spec,{kind:'selection',text:'old'});h.render();
+  h.packet(spec,{kind:'pinch',scale:1.25,fromLeft:44,fromTop:738});h.render();
+  assert.deepEqual(JSON.parse(JSON.stringify(h.reader.poses.current.get(1))),
+    {kind:'XYZ',left:44,top:738,zoom:0,fromScale:1.25,fromLeft:44,fromTop:738});
+  assert.equal(h.reader.poses.current.has(0),false);assert.equal(h.reader.mode,'pan');assert.equal(h.reader.selection,null);
+  assert.ok(h.calls.some(x=>Array.isArray(x)&&x[0]==='navigate'&&x[1]===1));await h.unmount();
+});
+
+test('pinch rejects stale ownership, epochs, modal/retired scenes and malformed mapping',async()=>{
+  for(const change of [{scale:NaN},{scale:Infinity},{scale:0},{scale:-1},{scale:'2'},
+    {fromLeft:Infinity},{fromTop:NaN},{fromLeft:'44'},{scale:1000001}]){
+    const h=harness();await h.reader.open(context);h.render();const spec=h.spec();h.bind(spec);
+    h.packet(spec,{kind:'pinch',scale:1.25,fromLeft:44,fromTop:738,...change});
+    assert.equal(h.render().revision,0);assert.equal(h.reader.poses.current.size,0);assert.deepEqual(h.calls,[]);await h.unmount();
+  }
+  for(const block of ['epoch','scene','input','modal','retired','text']){
+    const h=harness();await h.reader.open(context);h.render();let spec=h.spec();
+    if(block==='input')spec={...spec,inputBlocked:true};
+    if(block==='text')spec={...spec,mode:'text'};
+    h.bind(spec);
+    if(block==='epoch')h.reader.fenceInput();
+    if(block==='scene')h.setScene(2);
+    if(block==='modal')h.reader.showBookmarks();
+    if(block==='retired')await h.reader.close(true);
+    const before=h.calls.length;
+    h.packet(spec,{kind:'pinch',scale:1.25,fromLeft:44,fromTop:738});
+    assert.equal(h.render().revision,0);assert.equal(h.reader.poses.current.size,0);assert.equal(h.calls.length,before);await h.unmount();
+  }
+});
 test('Fit recovery fences and starts rendering before clearing error; cannot recover retired source',async()=>{
   const h=harness({close:async()=>{const e=Error('source changed');e.code='PDFIUM_SOURCE';throw e;}});
   await h.reader.open(context);h.render();h.reader.recoverFit();

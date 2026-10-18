@@ -4,11 +4,16 @@ import {NativeModules,Pressable,ScrollView,Text,View,findNodeHandle,
 import {validateOwner,requestSpec,packetMatches,internalDestination,flattenOutline} from './interactivePdf';
 
 const NativePage=requireNativeComponent('PdfiumPageView');
+export const PdfiumTouchHost=requireNativeComponent('PdfiumTouchHost');
 function serializeOperation(action) {
   const prior=globalThis.RTL_PDFIUM_SESSION_CHAIN ?? Promise.resolve();
   const operation=prior.catch(()=>{}).then(action);
   globalThis.RTL_PDFIUM_SESSION_CHAIN=operation.catch(()=>{});
   return operation;
+}
+function readerPinchValid(value){
+  return typeof value.scale==='number' && Number.isFinite(value.scale) && value.scale>0 && value.scale<=1000000 &&
+    ['fromLeft','fromTop'].every(key=>typeof value[key]==='number' && Number.isFinite(value[key]) && Math.abs(value[key])<=1000000);
 }
 export function useInteractivePdf(callbacks) {
   const live=useRef(true),closing=useRef(false),owned=useRef(null),closePromise=useRef(null);
@@ -96,6 +101,13 @@ export function useInteractivePdf(callbacks) {
     else if(value.kind==='selection') {if(typeof value.text==='string'&&value.text.length<=40000){setSelection({page:value.pageIndex,stamp:value.requestId,inputEpoch:value.inputEpoch,text:value.text});setFocused(value.pageIndex);latest.current.navigate(value.pageIndex);}}
     else if(value.kind==='copy')setNotice(value.verified===true?'Copied text (verified)':'Clipboard could not be verified');
     else if(value.kind==='viewport')anchors.current.set(value.pageIndex,{scale:value.scale,left:value.fromLeft,top:value.fromTop});
+    else if(value.kind==='pinch'){
+      if(expected.mode!=='text' && readerPinchValid(value))mutate(()=>{
+        poses.current.set(value.pageIndex,{kind:'XYZ',left:value.fromLeft,top:value.fromTop,zoom:0,
+          fromScale:value.scale,fromLeft:value.fromLeft,fromTop:value.fromTop});
+        setFocused(value.pageIndex);latest.current.navigate(value.pageIndex);setMode('pan');setNotice('');
+      });
+    }
     else if(value.kind==='gesture')latest.current.gesture({...value,slot:expected.slot});
   }
   function changeMode(next) {mutate(()=>{setMode(next);setNotice('');});}
@@ -162,8 +174,7 @@ export function InteractivePdfTools({reader,disabled,activePage}) {
   return <View style={{flexDirection:'row',flexWrap:'wrap',backgroundColor:'white'}}>
     <Text style={{padding:9}}>Active p.{Number.isInteger(activePage)?activePage+1:'—'}</Text>
     {action('Read',()=>reader.changeMode('read'))}{action('Text',()=>reader.changeMode('text'))}
-    {action('Pan',()=>reader.changeMode('pan'))}{action('−',()=>reader.zoom(.8))}
-    {action('+',()=>reader.zoom(1.25))}{action('Fit',reader.fit)}{action('Bookmarks',reader.showBookmarks)}
+    {action('Pan',()=>reader.changeMode('pan'))}{action('Fit',reader.fit)}{action('Bookmarks',reader.showBookmarks)}
     {action('Back',reader.back,reader.history.current.length===0)}{action('Copy',reader.copy,!reader.selection)}
     {reader.notice?<Text numberOfLines={2} ellipsizeMode="tail">{reader.notice}</Text>:null}
   </View>;

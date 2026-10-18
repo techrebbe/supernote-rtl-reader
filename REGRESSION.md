@@ -1,5 +1,41 @@
 # RTL Reader hardware regression
 
+## 2026-10-18 — user reading feedback: ergonomic correction, SOURCE ONLY
+
+Selected0.4.25-pdfium-exp12/code71. Single-page Fit uses the available viewport
+without the synthetic24px inset; page-view background is white, not a gray mat.
+Spread sizing/explicit Fill and original PDF crop/rotation remain authoritative.
+Native physical left tap now advances in RTL (right goes back); LTR opposite.
+Swipes, Bluetooth route and SDK Edit/Return/writer/save code are unchanged.
+
+Pinch replaces the +/- toolbar controls; Fit remains the reset. Read/Pan pinch
+targets its original page, preserves the source anchor under the final centroid,
+and requests one sharp reraster after gesture completion, not per MOVE. It uses
+existing session/request/revision/input fences, PDFium coordinate conversion and
+unchanged raster limits. Factors bounded .5..2 per gesture; total Fit..4xFit,
+still subject to existing memory rejection/Try Fit. Text mode does not pinch.
+Reader-owned non-splitting spread group keeps cross-page fingers with the first
+page. Blank-start multi-touch is cancelled, never interpreted as navigation.
+
+Independent narrow review found two P2s: early fraction validation dropped
+cross-edge swipes, and blank responders lacked sticky multi-touch cancellation.
+Both corrected together, independently confirmed CLOSED. Actual generated tap
+regression RED on70/GREEN locally; cross-edge reviewer reproduction RED/GREEN.
+Integration9 PASS incl22 actual native touch and22 queued anchor/fence assertions;
+112JS/current-hook/generated-JSX/Edit/SDK tests, native/v2/cross-layer/Edit gates
+and wiring6 PASS. Controlled peers are not Android touch/PDFium geometry proof.
+Final identity/pin review PASS; normalized24-input aggregate
+3c142c2c532181a12915685a2fc448140cd1a9c70257d1f2bc4cbbb796802be4.
+New copied/registered TouchHost manager is the legitimate24th receipt input.
+Only runtime/workflow identity pins changed, exact reverse verified; no ink repin.
+
+Exact clean build/package/signing gate next.71 UNBUILT/UNINSTALLED at this
+checkpoint; installed70 remains untouched. No Nomad access, source publication,
+timer or merge. Earliest hardware: separately approved exact package/fresh
+reservation on existing synthetic disposable fixture; portrait white Fit/RTL
+tap and unchanged swipe check, then separate real two-finger pinch/Fit trial.
+No original documents, pen, root/firmware or speculative emulator prerequisite.
+
 ## 2026-10-16 — code70 bounded left-page Edit/Return PASS; cleaned and released
 
 User explicitly approved exact70 installation/retest and complete reviewed

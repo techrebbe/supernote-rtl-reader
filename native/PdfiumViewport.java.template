@@ -2,12 +2,21 @@ package __PACKAGE__;
 
 /** Explicit PDF Fit semantics override a persisted reading Fill preference. */
 final class PdfiumViewport {
-    static double baseScale(int width,int height,double pageWidth,double pageHeight,String contentMode,String poseKind) {
+    static double baseScale(int width,int height,double pageWidth,double pageHeight,String contentMode,String poseKind,String slot) {
         if(width<=24 || height<=24 || !Double.isFinite(pageWidth) || !Double.isFinite(pageHeight) ||
             pageWidth<=0 || pageHeight<=0)throw new IllegalArgumentException("Invalid page viewport");
-        double fit=Math.min((width-24)/pageWidth,(height-24)/pageHeight);
+        // Single-page reading fits the available viewport without a synthetic
+        // gray mat/inset. Keep the existing spread gutter/layout preference.
+        int inset="single".equals(slot)?0:24;
+        double fit=Math.min((width-inset)/pageWidth,(height-inset)/pageHeight);
         return "native_fill".equals(contentMode) && !"Fit".equals(poseKind)
             ? Math.max(width/pageWidth,height/pageHeight):fit;
+    }
+    static double pinchScale(int width,int height,double pageWidth,double pageHeight,String slot,double currentScale,double factor){
+        if(!Double.isFinite(currentScale) || currentScale<=0 || !Double.isFinite(factor) || factor<.5 || factor>2)
+            throw new IllegalArgumentException("Invalid pinch geometry");
+        double fit=baseScale(width,height,pageWidth,pageHeight,"fit","Fit",slot);
+        return Math.max(fit,Math.min(fit*4,currentScale*factor));
     }
     private PdfiumViewport(){}
 }

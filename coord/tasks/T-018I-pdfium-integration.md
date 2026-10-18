@@ -1,5 +1,19 @@
 # T018I — user-approved PDFium reader integration
 
+CURRENT2026-10-18 ergonomic feedback correction SOURCE ONLY, exp12/code71.
+White single Fit/no24px inset, corrected physical RTL taps; existing swipe/BT/
+SDK Edit/Return paths preserved. Page-owned pinch replaces +/-; Fit resets,
+one release-time reraster using existing limits/PDFium source transforms/fences.
+Reader-owned TouchHost prevents two pages splitting a pinch; blank multi-touch
+cancels. Two narrow-review P2s corrected/confirmed CLOSED; no critical/high.
+Integration9 (22native touch/22async anchor),112JS and safety/wiring gates PASS;
+final24-input aggregate3c142c2c532181a12915685a2fc448140cd1a9c70257d1f2bc4cbbb796802be4
+independently confirmed. Runtime/workflow identity pins only, no ink repin.
+Exact clean package/signing next;71 UNBUILT/UNINSTALLED at this checkpoint,
+installed70 untouched. No Nomad/publication/timer/merge. Earliest safe hardware:
+separately approved exact candidate/disposable portrait Fit/RTL taps/swipe and
+then a real two-finger pinch/Fit gate. No pen/original/root/firmware/emulator loop.
+
 CURRENT exactabc8c879042b23a44001a504be352672cf31618a /exp11/code70 installed/ON,
 package ac2a2b4b1ca0a83c17b1729307dd70e17f338767c4e4890ef375a1b8368aa70e.
 Approved complete23-file source update published cb46352d19ca262853ae8e6537dedb5d15c57738.

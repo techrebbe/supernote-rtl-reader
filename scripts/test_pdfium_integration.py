@@ -28,10 +28,182 @@ def generated(output):
 
 
 class Integration(unittest.TestCase):
+    def test_actual_native_touch_sequences(self):
+        source=(ROOT/'native/PdfiumPageView.java.template').read_text(encoding='utf-8')
+        begin=source.index('    private static float bound(')
+        touch=source[begin:source.index('    private void follow(',begin)].replace('@Override ','')
+        harness=r'''package test;
+import java.util.*;
+class MotionEvent {
+ static final int ACTION_DOWN=0,ACTION_UP=1,ACTION_MOVE=2,ACTION_CANCEL=3,ACTION_POINTER_DOWN=5,ACTION_POINTER_UP=6;
+ final int action;final int[] ids;final float[] xs,ys;
+ MotionEvent(int a,int[] ids,float[] xs,float[] ys){action=a;this.ids=ids;this.xs=xs;this.ys=ys;}
+ int getActionMasked(){return action;}int getPointerCount(){return ids.length;}
+ int getPointerId(int i){return ids[i];}int findPointerIndex(int id){for(int i=0;i<ids.length;i++)if(ids[i]==id)return i;return -1;}
+ float getX(){return getX(0);}float getY(){return getY(0);}float getX(int i){return xs[i];}float getY(int i){return ys[i];}
+}
+class JSONObject {
+ String mode="read";long epoch;boolean blocked,inputBlocked;
+ String getString(String k){return k.equals("mode")?mode:k.equals("sessionId")?"11":"";}
+ String optString(String k){return getString(k);}long optLong(String k,long d){return epoch;}
+ boolean optBoolean(String k,boolean d){return k.equals("blocked")?blocked:inputBlocked;}
+ JSONArray getJSONArray(String k){return new JSONArray();}int getInt(String k){return 0;}
+ JSONObject getJSONObject(String k){return this;}
+}
+class JSONArray {int length(){return 0;}JSONObject getJSONObject(int i){return new JSONObject();}double getDouble(int i){return 0;}}
+class Bitmap {int getWidth(){return 600;}int getHeight(){return 800;}}
+class WritableMap extends HashMap<String,Object>{void putDouble(String k,double v){put(k,v);}void putString(String k,String v){put(k,v);}}
+class PdfiumSession {static boolean available=true;static void require(String id)throws Exception{if(!available)throw new Exception("gone");}}
+class ActualPage {
+ boolean disposed,ready=true,pressed,dragged,multiTouch,pinching;int pinchA,pinchB,start=-1,end=-1;
+ long revision=8,touchSequence,pinchRevision,pinchEpoch;float x,y,lastX,lastY,downX,downY;
+ float pinchDistance,pinchFactor,pinchSourceX,pinchSourceY,pinchFocusX,pinchFocusY;String selected="";
+ JSONObject request=new JSONObject(),model=new JSONObject();Bitmap bitmap=new Bitmap();
+ int pinches,gestures,links,anchors,failures;float[] result;
+ int getWidth(){return 600;}int getHeight(){return 800;}void invalidate(){}
+ int charAt(float a,float b){return -1;}void fail(long t,String m){failures++;}
+ WritableMap packet(String k){WritableMap m=new WritableMap();m.putString("kind",k);return m;}
+ void emit(WritableMap m){if(m.get("kind").equals("gesture"))gestures++;}
+ void follow(JSONObject j){links++;}void sendAnchor(){anchors++;}
+ void sendPinch(float f,float sx,float sy,float fx,float fy){pinches++;result=new float[]{f,sx,sy,fx,fy};}
+ /*ACTUAL_TOUCH*/
+}
+public class TouchTest {
+ static int assertions;static void ok(boolean b,String message){if(!b)throw new AssertionError(message);assertions++;}
+ static void one(ActualPage p,int a,float x,float y){p.onTouchEvent(new MotionEvent(a,new int[]{5},new float[]{x},new float[]{y}));}
+ static void two(ActualPage p,int a,float bx){p.onTouchEvent(new MotionEvent(a,new int[]{5,9},new float[]{100,bx},new float[]{200,200}));}
+ static ActualPage begin(){ActualPage p=new ActualPage();one(p,0,100,200);two(p,5,300);return p;}
+ static void end(ActualPage p){two(p,6,350);one(p,1,100,200);}
+ public static void main(String[] args){
+  ActualPage tap=new ActualPage();one(tap,0,100,200);one(tap,1,100,200);ok(tap.gestures==1&&tap.pinches==0,"single tap unchanged");
+  ActualPage swipe=new ActualPage();one(swipe,0,100,200);one(swipe,2,300,200);one(swipe,1,300,200);ok(swipe.gestures==1&&swipe.pinches==0,"single swipe unchanged");
+  ActualPage p=begin();two(p,2,350);ok(p.pinches==0,"MOVE never rerasterizes");end(p);
+  ok(p.pinches==1&&p.gestures==0&&p.links==0,"one pinch, never two taps/links");
+  ok(p.result[0]==1.25f&&p.result[1]==200&&p.result[2]==200&&p.result[3]==225&&p.result[4]==200,"source anchor and final focus captured");
+  one(p,0,100,200);one(p,1,100,200);ok(p.gestures==1,"new single contact allowed after pinch ends");
+  p=begin();two(p,6,300);one(p,1,100,200);ok(p.pinches==0&&p.gestures==0,"two-finger tap suppressed");
+  p=begin();two(p,2,350);one(p,3,100,200);end(p);ok(p.pinches==0&&p.gestures==0,"cancel suppresses pinch and trailing UP");
+  p=begin();p.onTouchEvent(new MotionEvent(5,new int[]{5,9,12},new float[]{100,350,400},new float[]{200,200,200}));end(p);
+  ok(p.pinches==0&&p.gestures==0,"third pointer cancels whole contact");
+  p=begin();p.onTouchEvent(new MotionEvent(2,new int[]{9,5},new float[]{350,100},new float[]{200,200}));end(p);
+  ok(p.pinches==1&&p.result[0]==1.25f,"pointer indices may reorder; IDs own contact");
+  for(String change:new String[]{"revision","epoch","blocked","input","notready","disposed","session","missing","nonfinite"}){
+   p=begin();two(p,2,350);
+   switch(change){case "revision":p.revision++;break;case "epoch":p.request.epoch++;break;
+    case "blocked":p.request.blocked=true;break;case "input":p.request.inputBlocked=true;break;
+    case "notready":p.ready=false;break;case "disposed":p.disposed=true;break;case "session":PdfiumSession.available=false;break;
+    case "missing":p.onTouchEvent(new MotionEvent(2,new int[]{5,10},new float[]{100,350},new float[]{200,200}));break;
+    case "nonfinite":two(p,2,Float.NaN);break;}
+   end(p);ok(p.pinches==0&&p.gestures==0,"reject "+change);PdfiumSession.available=true;
+  }
+  p=new ActualPage();p.request.mode="text";one(p,0,100,200);two(p,5,300);end(p);ok(p.pinches==0&&p.gestures==0,"Text mode cannot pinch");
+  p=begin();two(p,2,2000);two(p,6,2000);one(p,1,100,200);
+  ok(p.pinches==1&&p.result[0]==2&&p.result[3]==600,"gesture factor/focus bounded even across sibling");
+  p=begin();two(p,2,120);two(p,6,120);one(p,1,100,200);ok(p.result[0]==.5f,"inward factor bounded");
+  System.out.println(assertions+" actual native touch/pointer/cancel assertions PASS (controlled MotionEvent, not hardware)");
+ }
+}
+'''
+        home=Path(os.environ['JAVA_HOME'])/'bin';suffix='.exe' if os.name=='nt' else ''
+        with tempfile.TemporaryDirectory(prefix='pdfium-touch-') as temp:
+            root=Path(temp);java=root/'TouchTest.java'
+            (root/'Interaction.java').write_text((ROOT/'probes/pdfium-native/Interaction.java').read_text().replace(
+                'package com.techrebbe.rtl.pdfiumprobe;','package test;'),encoding='utf-8')
+            java.write_text(harness.replace('/*ACTUAL_TOUCH*/',touch),encoding='utf-8')
+            subprocess.run([str(home/('javac'+suffix)),'-encoding','UTF-8','-d',temp,str(root/'Interaction.java'),str(java)],check=True)
+            result=subprocess.run([str(home/('java'+suffix)),'-cp',temp,'test.TouchTest'],capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr);print(result.stdout.strip())
+
+    def test_actual_pinch_async_anchor_and_fences(self):
+        source=(ROOT/'native/PdfiumPageView.java.template').read_text(encoding='utf-8')
+        begin=source.index('    private void sendPinch(')
+        pinch=source[begin:source.index('    private void sendAnchor()',begin)]
+        begin=source.index('    private boolean current(')
+        current=source[begin:source.index('    private void schedule()',begin)]
+        harness=r'''package test;
+import java.util.*;
+class JSONObject {
+ long epoch;boolean inputBlocked;
+ String optString(String k){return k.equals("sessionId")?"11":k.equals("slot")?"single":"stamp";}
+ long optLong(String k,long d){return epoch;}boolean optBoolean(String k,boolean d){return inputBlocked;}
+ int getInt(String k){return k.equals("pageIndex")?1:k.equals("renderWidth")?600:800;}
+}
+class WritableMap extends HashMap<String,Object>{void putDouble(String k,double v){put(k,v);}void putString(String k,String v){put(k,v);}}
+class Queue {final Deque<Runnable> work=new ArrayDeque<>();void execute(Runnable r){work.add(r);}void drain(){while(!work.isEmpty())work.remove().run();}}
+class PdfiumSession {
+ static Queue QUEUE=new Queue();static final PdfiumSession SESSION=new PdfiumSession();long token=11;boolean alive=true;
+ static PdfiumSession require(String id){return SESSION;}boolean current(){return alive;}
+}
+class PdfiumReaderCore {
+ static boolean rotated,broken;static int pointCalls;
+ static double[] size(long id,int page){return new double[]{600,800};}
+ // Controlled invertible CropBox/rotation peers. Actual JNI/PDFium geometry
+ // remains separately gated; this checks the production composition/order.
+ static double[] point(long id,int page,int w,int h,double x,double y,boolean inverse){
+  pointCalls++;if(broken)throw new IllegalArgumentException("geometry");
+  if(inverse){double u=x/w,v=y/h;return rotated?new double[]{20+600*v,30+800*u}:new double[]{20+600*u,30+800*(1-v)};}
+  double u=rotated?(y-30)/800:(x-20)/600,v=rotated?(x-20)/600:1-(y-30)/800;return new double[]{u*w,v*h};
+ }
+}
+class ActualPage {
+ JSONObject request=new JSONObject(),model=new JSONObject();long revision=8,touchSequence=3;
+ boolean disposed,attached=true,failed,ready=true;int failures;final Queue ui=new Queue();final List<WritableMap> events=new ArrayList<>();
+ int getWidth(){return 600;}int getHeight(){return 800;}void dispatch(Runnable r){ui.execute(r);}
+ WritableMap packet(String k){WritableMap m=new WritableMap();m.putString("kind",k);return m;}
+ void emit(WritableMap m){events.add(m);}void fail(long t,String m){if(!disposed&&revision==t&&!failed){failed=true;failures++;}}
+ /*ACTUAL_CURRENT*/
+ /*ACTUAL_PINCH*/
+ void finish(){sendPinch(1.25f,200,200,225,200);}
+}
+public class PinchAsyncTest {
+ static int assertions;static void ok(boolean b,String label){if(!b)throw new AssertionError(label);assertions++;}
+ static double number(WritableMap p,String k){return ((Number)p.get(k)).doubleValue();}
+ public static void main(String[] args){
+  for(boolean rotation:new boolean[]{false,true}){
+   PdfiumReaderCore.rotated=rotation;ActualPage p=new ActualPage();p.finish();
+   ok(p.events.isEmpty()&&PdfiumSession.QUEUE.work.size()==1,"one read-only queue operation");
+   PdfiumSession.QUEUE.drain();ok(p.events.isEmpty()&&p.ui.work.size()==1,"native result awaits UI admission");p.ui.drain();
+   ok(p.events.size()==1&&p.events.get(0).get("kind").equals("pinch"),"one current pinch packet");
+   WritableMap packet=p.events.get(0);ok(number(packet,"scale")==1.25,"scale from actual integer dimensions");
+   double[] anchor=PdfiumReaderCore.point(11,1,600,800,200,200,true);
+   double[] target=PdfiumReaderCore.point(11,1,750,1000,anchor[0],anchor[1],false);
+   double[] origin=PdfiumReaderCore.point(11,1,750,1000,number(packet,"fromLeft"),number(packet,"fromTop"),false);
+   ok(Math.abs(target[0]-origin[0]-225)<.001&&Math.abs(target[1]-origin[1]-200)<.001,"same original source point remains at final centroid, rotated="+rotation);
+  }
+  for(String race:new String[]{"ticket","epoch","newcontact","input","notready","disposed","detached","failed","session"}){
+   ActualPage p=new ActualPage();p.finish();PdfiumSession.QUEUE.drain();
+   switch(race){case "ticket":p.revision++;break;case "epoch":p.request.epoch++;break;case "newcontact":p.touchSequence++;break;
+    case "input":p.request.inputBlocked=true;break;case "notready":p.ready=false;break;case "disposed":p.disposed=true;break;
+    case "detached":p.attached=false;break;case "failed":p.failed=true;break;case "session":PdfiumSession.SESSION.alive=false;break;}
+   p.ui.drain();ok(p.events.isEmpty(),"UI drops delayed pinch: "+race);PdfiumSession.SESSION.alive=true;
+  }
+  ActualPage p=new ActualPage();p.finish();p.revision++;int calls=PdfiumReaderCore.pointCalls;PdfiumSession.QUEUE.drain();p.ui.drain();
+  ok(PdfiumReaderCore.pointCalls==calls&&p.events.isEmpty(),"stale queued request does no geometry work");
+  PdfiumReaderCore.broken=true;p=new ActualPage();p.finish();PdfiumSession.QUEUE.drain();p.ui.drain();ok(p.failures==1,"current geometry failure uses existing terminal error path");
+  p=new ActualPage();p.finish();PdfiumSession.QUEUE.drain();p.touchSequence++;p.ui.drain();ok(p.failures==0,"old contact failure cannot poison a new contact");
+  PdfiumReaderCore.broken=false;
+  System.out.println(assertions+" actual pinch queue/anchor/stale-contact assertions PASS (controlled peers)");
+ }
+}
+'''
+        home=Path(os.environ['JAVA_HOME'])/'bin';suffix='.exe' if os.name=='nt' else ''
+        with tempfile.TemporaryDirectory(prefix='pdfium-pinch-async-') as temp:
+            root=Path(temp);java=root/'PinchAsyncTest.java'
+            (root/'PdfiumViewport.java').write_text((ROOT/'native/PdfiumViewport.java.template').read_text().replace('__PACKAGE__','test'),encoding='utf-8')
+            (root/'RenderBudget.java').write_text((ROOT/'probes/pdfium-native/RenderBudget.java').read_text().replace(
+                'package com.techrebbe.rtl.pdfiumprobe;','package test;'),encoding='utf-8')
+            java.write_text(harness.replace('/*ACTUAL_CURRENT*/',current).replace('/*ACTUAL_PINCH*/',pinch),encoding='utf-8')
+            subprocess.run([str(home/('javac'+suffix)),'-encoding','UTF-8','-d',temp,
+                str(root/'PdfiumViewport.java'),str(root/'RenderBudget.java'),str(java)],check=True)
+            result=subprocess.run([str(home/('java'+suffix)),'-cp',temp,'test.PinchAsyncTest'],capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr);print(result.stdout.strip())
+
     def test_real_generated_slots_and_guards(self):
         with tempfile.TemporaryDirectory(prefix='pdfium-integrated-app-') as temp:
             app,index=generated(Path(temp))
             self.assertEqual(app.count('<InteractivePdfPage'),3)
+            self.assertEqual(app.count('<PdfiumTouchHost style={styles.spread}>'),1)
+            self.assertEqual(app.count('</PdfiumTouchHost>'),1)
             self.assertNotIn('<NativePdfPageView',app)
             self.assertEqual(app.count('blocked={Boolean(fatalError) || display.pdfiumRevision !== pdfium.revision}'),3)
             self.assertEqual(app.count('pdfiumRevision: pdfium.revision,'),2)
@@ -77,7 +249,7 @@ import java.awt.image.BufferedImage;
 import java.util.ArrayDeque;
 import java.util.Deque;
 
-class Color {static final int LTGRAY=0xffcccccc,BLACK=0xff000000;}
+class Color {static final int WHITE=0xffffffff,BLACK=0xff000000;}
 class Paint {int color;void setColor(int value){color=value;}}
 class Bitmap {
  final BufferedImage image;
@@ -127,10 +299,10 @@ public class DrawTest {
    Canvas c=new Canvas();ActualPage left=page(BLUE),right=page(RED);
    if(reverse){draw(c,right,123,30);draw(c,left,20,30);}else{draw(c,left,20,30);draw(c,right,123,30);}
    ok(c.pixel(45,65)==BLUE,"left original page survives sibling");ok(c.pixel(148,65)==RED,"right original page survives sibling");
-   ok(c.pixel(22,32)==Color.LTGRAY,"viewport background drawn");untouched(c);
+   ok(c.pixel(22,32)==Color.WHITE,"white viewport background drawn");untouched(c);
   }
   Canvas empty=new Canvas();draw(empty,new ActualPage(),20,30);
-  ok(empty.pixel(22,32)==Color.LTGRAY,"empty viewport fills only itself");untouched(empty);
+  ok(empty.pixel(22,32)==Color.WHITE,"empty viewport fills only itself");untouched(empty);
   ActualPage panned=page(BLUE);panned.bitmap=new Bitmap(220,220,BLUE);panned.x=-40;panned.y=-35;
   Canvas pan=new Canvas();draw(pan,panned,20,30);ok(pan.pixel(22,32)==BLUE,"negative pan retained");
   ok(pan.pixel(119,169)==BLUE,"bitmap reaches viewport edge");untouched(pan);
@@ -140,7 +312,7 @@ public class DrawTest {
   ok(selection.pixel(45,65)!=RED,"selection actually painted");untouched(selection);
   ActualPage small=page(RED);small.model=new JSONObject(false);small.start=small.end=0;
   Canvas smallSelection=new Canvas();draw(smallSelection,small,20,30);
-  ok(smallSelection.pixel(22,32)==Color.LTGRAY,"selection is also bounded by bitmap");
+  ok(smallSelection.pixel(22,32)==Color.WHITE,"selection is also bounded by bitmap");
   ok(smallSelection.pixel(45,65)!=RED,"small selection actually painted");untouched(smallSelection);
   selected.model=new JSONObject(true);Canvas failure=new Canvas();draw(failure,selected,20,30);
   ok(selected.failures==1,"selection failure exercised");untouched(failure);
@@ -277,13 +449,22 @@ b.release();b.release();ok(ledger.used()==12000000);
 a.installed();ok(ledger.used()==12000000);a.release();ok(ledger.used()==0);
 refused=false;try{ledger.reserve(6000001,0);}catch(IllegalArgumentException e){refused=true;}ok(refused);
 refused=false;try{ledger.reserve(5000000,20000000);}catch(IllegalStateException e){refused=true;}ok(refused);
-ok(PdfiumViewport.baseScale(600,800,600,800,"native_fill",null)==1);
-ok(PdfiumViewport.baseScale(600,800,600,800,"native_fill","Fit")==.96);
-ok(PdfiumViewport.baseScale(600,800,600,800,"fit","Fit")==.96);
-ok(PdfiumViewport.baseScale(900,600,600,800,"native_fill","Fit")==.72);
-ok(PdfiumViewport.baseScale(900,600,600,800,"native_fill",null)==1.5);
-refused=false;try{PdfiumViewport.baseScale(20,600,600,800,"fit","Fit");}catch(IllegalArgumentException e){refused=true;}ok(refused);
-System.out.println("14 actual shared-raster/Fit assertions PASS");}}
+ok(PdfiumViewport.baseScale(600,800,600,800,"native_fill",null,"left")==1);
+ok(PdfiumViewport.baseScale(600,800,600,800,"native_fill","Fit","left")==.96);
+ok(PdfiumViewport.baseScale(600,800,600,800,"fit","Fit","right")==.96);
+ok(PdfiumViewport.baseScale(900,600,600,800,"native_fill","Fit","right")==.72);
+ok(PdfiumViewport.baseScale(900,600,600,800,"native_fill",null,"right")==1.5);
+refused=false;try{PdfiumViewport.baseScale(20,600,600,800,"fit","Fit","single");}catch(IllegalArgumentException e){refused=true;}ok(refused);
+ok(PdfiumViewport.baseScale(600,800,600,800,"fit",null,"single")==1);
+ok(PdfiumViewport.baseScale(600,700,600,800,"fit",null,"single")==.875);
+ok(PdfiumViewport.baseScale(600,800,600,800,"native_fill","Fit","single")==1);
+ok(PdfiumViewport.pinchScale(600,800,600,800,"single",1,1.25)==1.25);
+ok(PdfiumViewport.pinchScale(600,800,600,800,"single",1,.5)==1);
+ok(PdfiumViewport.pinchScale(600,800,600,800,"single",3,2)==4);
+for(double bad:new double[]{Double.NaN,Double.POSITIVE_INFINITY,0,-1,.49,2.01}){
+ refused=false;try{PdfiumViewport.pinchScale(600,800,600,800,"single",1,bad);}catch(IllegalArgumentException e){refused=true;}ok(refused);
+}
+System.out.println("26 actual shared-raster/Fit/pinch assertions PASS");}}
 ''',encoding='utf-8')
             subprocess.run([str(home/('javac'+suffix)),'-encoding','UTF-8','-d',temp,
                 str(root/'PdfiumRasterLedger.java'),str(root/'PdfiumViewport.java'),str(root/'LedgerTest.java')],check=True)

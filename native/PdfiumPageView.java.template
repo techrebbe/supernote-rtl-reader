@@ -30,6 +30,10 @@ public final class PdfiumPageView extends View {
     private JSONObject model;
     private PdfiumRasterLedger.Lease lease;
     private float x,y,lastX,lastY,downX,downY;
+    private boolean multiTouch,pinching;
+    private int pinchA,pinchB;
+    private long touchSequence,pinchRevision,pinchEpoch;
+    private float pinchDistance,pinchFactor,pinchSourceX,pinchSourceY,pinchFocusX,pinchFocusY;
     private int start=-1,end=-1;
     private String selected="";
     private final Paint paint=new Paint();
@@ -84,7 +88,7 @@ public final class PdfiumPageView extends View {
                 int page=command.getInt("pageIndex");double[] size=PdfiumReaderCore.size(session.token,page);
                 JSONObject pose=command.optJSONObject("pose");double[] anchor=null;
                 double scale=PdfiumViewport.baseScale(viewW,viewH,size[0],size[1],command.optString("contentMode"),
-                    pose==null?null:pose.optString("kind"));
+                    pose==null?null:pose.optString("kind"),command.optString("slot"));
                 if(pose!=null){
                     String kind=pose.getString("kind");
                     if(kind.equals("scale"))scale=pose.getDouble("scale");
@@ -185,7 +189,7 @@ public final class PdfiumPageView extends View {
         int viewport=canvas.save();
         try{
             canvas.clipRect(0,0,getWidth(),getHeight());
-            canvas.drawColor(Color.LTGRAY);if(bitmap==null)return;
+            canvas.drawColor(Color.WHITE);if(bitmap==null)return;
             paint.setColor(Color.BLACK);canvas.drawBitmap(bitmap,x,y,paint);
             if(start<0 || end<0 || model==null)return;
             int clip=canvas.save();canvas.clipRect(x,y,x+bitmap.getWidth(),y+bitmap.getHeight());paint.setColor(0x604060e0);
@@ -200,11 +204,53 @@ public final class PdfiumPageView extends View {
             JSONArray r=chars.getJSONObject(i).getJSONArray("rect");if(px>=r.getDouble(0)&&px<=r.getDouble(2)&&py>=r.getDouble(1)&&py<=r.getDouble(3))return i;
         }return -1;
     }
+    private static float bound(float value,float low,float high){return Math.max(low,Math.min(high,value));}
+    private boolean pinchTouch(MotionEvent event,String mode){
+        int action=event.getActionMasked();
+        if(action==MotionEvent.ACTION_POINTER_DOWN){
+            boolean eligible=pressed && !multiTouch && event.getPointerCount()==2 && !mode.equals("text");
+            multiTouch=true;pinching=false;pressed=false;
+            if(eligible){
+                float ax=event.getX(0),ay=event.getY(0),bx=event.getX(1),by=event.getY(1);
+                float distance=(float)Math.hypot(ax-bx,ay-by);
+                if(Float.isFinite(distance) && distance>=16){
+                    pinchA=event.getPointerId(0);pinchB=event.getPointerId(1);pinchDistance=distance;pinchFactor=1;
+                    pinchFocusX=bound((ax+bx)/2,0,getWidth());pinchFocusY=bound((ay+by)/2,0,getHeight());
+                    pinchSourceX=bound(pinchFocusX-x,0,bitmap.getWidth());pinchSourceY=bound(pinchFocusY-y,0,bitmap.getHeight());
+                    pinchRevision=revision;pinchEpoch=request.optLong("inputEpoch",-1);pinching=true;
+                    start=end=-1;selected="";invalidate();
+                }
+            }
+            return true;
+        }
+        if(!multiTouch)return false;
+        if(pinching){
+            int a=event.findPointerIndex(pinchA),b=event.findPointerIndex(pinchB);
+            if(revision!=pinchRevision || request.optLong("inputEpoch",-1)!=pinchEpoch || event.getPointerCount()!=2 || a<0 || b<0)pinching=false;
+            else{
+                float ax=event.getX(a),ay=event.getY(a),bx=event.getX(b),by=event.getY(b);
+                float factor=(float)Math.hypot(ax-bx,ay-by)/pinchDistance;
+                if(!Float.isFinite(factor) || !Float.isFinite(ax+ay+bx+by))pinching=false;
+                else{pinchFactor=bound(factor,.5f,2f);pinchFocusX=bound((ax+bx)/2,0,getWidth());pinchFocusY=bound((ay+by)/2,0,getHeight());}
+            }
+        }
+        if(action==MotionEvent.ACTION_POINTER_UP){
+            if(pinching && Math.abs(pinchFactor-1)>=.03f)sendPinch(pinchFactor,pinchSourceX,pinchSourceY,pinchFocusX,pinchFocusY);
+            pinching=false;
+        }
+        if(action==MotionEvent.ACTION_UP){multiTouch=false;pinching=false;pressed=false;}
+        // Never reinterpret either remaining finger as a page tap/swipe/link.
+        return true;
+    }
     @Override public boolean onTouchEvent(MotionEvent event){
-        if(disposed || !ready || request==null || request.optBoolean("blocked",true) || request.optBoolean("inputBlocked",true) || model==null || bitmap==null || event.getPointerCount()!=1){pressed=false;return true;}
+        if(event.getActionMasked()==MotionEvent.ACTION_DOWN){++touchSequence;multiTouch=false;pinching=false;}
+        if(disposed || !ready || request==null || request.optBoolean("blocked",true) || request.optBoolean("inputBlocked",true) || model==null || bitmap==null){pressed=false;pinching=false;return true;}
         try{PdfiumSession.require(request.getString("sessionId"));}catch(Exception error){ready=false;pressed=false;return true;}
         float px=event.getX()-x,py=event.getY()-y;String mode=request.optString("mode");
         try{
+            if(event.getActionMasked()==MotionEvent.ACTION_CANCEL){++touchSequence;multiTouch=false;pinching=false;pressed=false;start=end=-1;invalidate();return true;}
+            if(pinchTouch(event,mode))return true;
+            if(event.getPointerCount()!=1){pressed=false;return true;}
             if(event.getActionMasked()==MotionEvent.ACTION_DOWN){pressed=true;dragged=false;downX=lastX=event.getX();downY=lastY=event.getY();
                 if(mode.equals("text")){start=end=charAt(px,py);invalidate();}return true;}
             if(!pressed)return true;
@@ -249,6 +295,30 @@ public final class PdfiumPageView extends View {
             }catch(Exception|LinkageError error){dispatch(()->{if(request!=null &&
                 inputEpoch==request.optLong("inputEpoch",-1))fail(ticket,"Link context rejected");});}
         });
+    }
+    private void sendPinch(float factor,float sourceX,float sourceY,float focusX,float focusY){
+        final String owner=request.optString("sessionId"),stamp=request.optString("requestId"),slot=request.optString("slot");
+        final long ticket=revision,inputEpoch=request.optLong("inputEpoch",-1),contact=touchSequence;
+        final JSONObject metadata=model;final int viewW=getWidth(),viewH=getHeight();
+        // One reraster request only after the gesture ends; no per-MOVE bitmap
+        // allocation or change to the existing shared raster budget.
+        PdfiumSession.QUEUE.execute(()->{try{
+            PdfiumSession session=PdfiumSession.require(owner);
+            if(!current(ticket,owner,stamp))return;
+            int page=metadata.getInt("pageIndex"),oldW=metadata.getInt("renderWidth"),oldH=metadata.getInt("renderHeight");
+            double[] size=PdfiumReaderCore.size(session.token,page);
+            double scale=PdfiumViewport.pinchScale(viewW,viewH,size[0],size[1],slot,oldW/size[0],factor);
+            int[] dimensions=RenderBudget.dimensions(size[0],size[1],scale,Runtime.getRuntime().maxMemory(),0);
+            double[] anchor=PdfiumReaderCore.point(session.token,page,oldW,oldH,sourceX,sourceY,true);
+            double[] mapped=PdfiumReaderCore.point(session.token,page,dimensions[0],dimensions[1],anchor[0],anchor[1],false);
+            double[] origin=PdfiumReaderCore.point(session.token,page,dimensions[0],dimensions[1],mapped[0]-focusX,mapped[1]-focusY,true);
+            dispatch(()->{if(!current(ticket,owner,stamp) || !ready || !session.current() || contact!=touchSequence ||
+                inputEpoch!=request.optLong("inputEpoch",-1) || request.optBoolean("inputBlocked",true))return;
+                WritableMap result=packet("pinch");result.putDouble("scale",dimensions[0]/size[0]);
+                result.putDouble("fromLeft",origin[0]);result.putDouble("fromTop",origin[1]);emit(result);
+            });
+        }catch(Exception|LinkageError error){dispatch(()->{if(request!=null && contact==touchSequence &&
+            inputEpoch==request.optLong("inputEpoch",-1))fail(ticket,"PDF page/zoom rejected: "+error.getMessage());});}});
     }
     private void sendAnchor()throws Exception{
         final String owner=request.getString("sessionId"),stamp=request.getString("requestId");final long ticket=revision;

@@ -1077,7 +1077,9 @@ def check(repo_root: Path) -> None:
             # T018I exp10 marker ONLY; reverse restores
             # 7a8d04e8...2e15aac. Revision admission is in the final generator.
             # H13 exp11 marker ONLY; exact reverse restores f0212147...c901c.
-            "d362a3fafe9761e15e621e6eb695c00765be98c8685c46682577b2d2484919a4",
+            # Ergonomics exp12 marker ONLY; exact reverse restores the prior
+            # d362a3fa...919a4 digest. Gesture implementation is separate.
+            "0d0a9290941d041e57aed8ec7e867b915556567fe75047fbf108a955af8e6b9a",
             "Edit/Return activation and close authority",
         ),
         (
@@ -1114,7 +1116,9 @@ def check(repo_root: Path) -> None:
             # T018I exp10 artifact label ONLY; reverse restores
             # 770414ed...64725f58. No test/build/signing/SDK/action change.
             # H13 exp11 artifact label ONLY; reverse restores 2d6bbabb...43bc9.
-            "8f773bbada5899e422615ee7536653777043e5165ad261c88335c7862bc93255",
+            # Ergonomics exp12 artifact label ONLY; exact reverse restores
+            # 8f773bba...93255. Signing/actions/SDK/permissions unchanged.
+            "ccaf9cd87948869d44646fdd5c9f4ff2c4ea810eae80722213d531065c174727",
             "Native Spread companion-build workflow",
         ),
         (

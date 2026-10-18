@@ -1,0 +1,17 @@
+package __PACKAGE__;
+
+import com.facebook.react.uimanager.ThemedReactContext;
+import com.facebook.react.views.view.ReactViewGroup;
+import com.facebook.react.views.view.ReactViewManager;
+
+/** Reader-only spread group. A contact sequence has one original-page owner. */
+public final class PdfiumTouchHostManager extends ReactViewManager {
+    @Override public String getName(){return "PdfiumTouchHost";}
+    @Override public ReactViewGroup createViewInstance(ThemedReactContext context){
+        ReactViewGroup view=new ReactViewGroup(context);
+        // Android otherwise splits two fingers across the two page children,
+        // which could turn a pinch into two independent one-finger taps.
+        view.setMotionEventSplittingEnabled(false);
+        return view;
+    }
+}

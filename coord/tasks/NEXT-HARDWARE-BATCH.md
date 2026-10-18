@@ -1,5 +1,30 @@
 # Next useful hardware batch — no speculative test loop
 
+## Next: reviewed ergonomic71, after exact package/signature and user approval
+
+Source-only user feedback batch: portrait/single white Fit/no inset, corrected
+RTL physical edge taps, pinch instead of +/- with Fit reset. exp12/code71.
+Independent source/correction/identity review CLEAN; two P2s CLOSED; Integration9
+and112JS/current-App gates PASS. Exact clean build/signature next; UNINSTALLED,
+installed70 untouched. No source publication, device reservation or timer action.
+
+Earliest decisive real-device gate, not speculative emulation:
+
+1. After exact package approval, NEW exclusive reservation/full preflight and
+   normal upgrade on existing synthetic disposable fixture. Portrait initial
+   READY must be white Fit/complete page, no gray mat. RTL left-edge tap advances,
+   right returns, existing physical swipe directions remain correct. Normal
+   Close/restoration/integrity/owned cleanup/release; stop first mismatch/error.
+2. Same installed71 under separately scoped NEW reservation: actual two-finger
+   pinch in Read/Pan, one reraster/end, intended original page/focal anchor and
+   no accidental tap/swipe/link; Fit restores. Include a spread-seam and blank-
+   start cancellation check only if the basic pinch passes. This needs human
+   fingers; do other safe setup first. No pen or repeated Bluetooth code discovery.
+
+Each trial explicitly observes PASS/FAIL/UNKNOWN and stops on source/page/owner/
+render/transport/cleanup uncertainty. Retain70 rollback. No originals, root,
+firmware, memory-cap changes, ink revival, timer resume or merge. Do not reuse H14.
+
 ## Completed: exact70 Edit/Return; next is alpha acceptance, not another offline cycle
 
 User approved exact70 install/one-shot retest and complete reviewed23-file source

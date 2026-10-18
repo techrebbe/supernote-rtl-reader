@@ -12,7 +12,7 @@ from pdfium_elf import verify_wrapper
 from pdfium_provider import generate as provider_header
 
 JAVA = ('PdfiumReaderCore','PdfiumRasterLedger','PdfiumViewport','PdfiumEngine','PdfiumSession','PdfiumReaderModule',
-        'PdfiumPageView','PdfiumPageViewManager')
+        'PdfiumPageView','PdfiumPageViewManager','PdfiumTouchHostManager')
 
 
 def source_inputs(root):
@@ -115,7 +115,7 @@ def build(project, root, engine, sdk):
             'package com.techrebbe.rtl.pdfiumprobe;','package com.supernotertlreader;'),encoding='utf-8')
     package=java/'PdfRendererPackage.kt';text=package.read_text(encoding='utf-8')
     for before,after in [('        PdfRendererModule(reactContext),','        PdfRendererModule(reactContext),\n        PdfiumReaderModule(reactContext),'),
-                         ('        PdfPageViewManager(),','        PdfPageViewManager(),\n        PdfiumPageViewManager(),')]:
+                         ('        PdfPageViewManager(),','        PdfPageViewManager(),\n        PdfiumPageViewManager(),\n        PdfiumTouchHostManager(),')]:
         if text.count(before)!=1:raise ValueError('Canonical package registration drift')
         text=text.replace(before,after,1)
     package.write_text(text,encoding='utf-8')

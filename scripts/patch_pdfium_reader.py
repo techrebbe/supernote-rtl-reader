@@ -12,7 +12,7 @@ def once(text, old, new, label):
 def patch_app(text):
     text = once(text, "import ReaderKeyView from './ReaderKeyView';",
         "import ReaderKeyView from './ReaderKeyView';\n"
-        "import {useInteractivePdf,InteractivePdfPage,InteractivePdfTools,InteractivePdfBookmarks} from './InteractivePdfReader';\n"
+        "import {useInteractivePdf,InteractivePdfPage,InteractivePdfTools,InteractivePdfBookmarks,PdfiumTouchHost} from './InteractivePdfReader';\n"
         "import {restoreSourcePreferences} from './interactivePdf';", 'imports')
     text = once(text, "  const [pageAreaLayout, setPageAreaLayout] = useState({width: 0, height: 0});",
         "  const [readerWindowLayout, setReaderWindowLayout] = useState({width: 0, height: 0});\n"
@@ -44,14 +44,16 @@ def patch_app(text):
     gesture: event => {
       if (readerTransitionLocked() || renderingRef.current || pdfium.modalRef.current) return;
       const {dx,dy} = event;
+      if (![dx,dy].every(Number.isFinite)) return;
       if (Math.abs(dx) > Math.abs(dy) && handlePhysicalSwipe(dx)) return;
       if (Math.abs(dx) > TAP_SLOP || Math.abs(dy) > TAP_SLOP) return;
+      if (!Number.isFinite(event.fraction) || event.fraction < 0 || event.fraction > 1) return;
       const fraction = event.slot === 'left' ? event.fraction / 2 :
         event.slot === 'right' ? .5 + event.fraction / 2 : event.fraction;
       if (fraction <= EDGE_ZONE) {
-        if (directionRef.current === 'rtl') previousLogicalPage(); else nextLogicalPage();
-      } else if (fraction >= 1-EDGE_ZONE) {
         if (directionRef.current === 'rtl') nextLogicalPage(); else previousLogicalPage();
+      } else if (fraction >= 1-EDGE_ZONE) {
+        if (directionRef.current === 'rtl') previousLogicalPage(); else nextLogicalPage();
       } else { setPageIndex(event.pageIndex); setChromeVisible(value => !value); }
     },
   });
@@ -137,6 +139,40 @@ def patch_app(text):
     # retain the proven RN reading gestures; never compete with a PDF surface.
     text = text.replace('<View style={styles.blankPage} />',
         '<View style={styles.blankPage} {...panResponderRef.current.panHandlers} />')
+    # Blank slots keep the existing RN coordinate correction, but use the same
+    # physical edge-to-logical mapping as native PDF pages. Swipes are unchanged.
+    begin=text.index('  const handlePhysicalTap =')
+    end=text.index('  const panResponderRef =',begin)
+    tap=text[begin:end]
+    tap=once(tap,"if (directionRef.current === 'rtl') previousLogicalPage();\n      else nextLogicalPage();",
+        "if (directionRef.current === 'rtl') nextLogicalPage();\n      else previousLogicalPage();",'blank left tap')
+    tap=once(tap,"if (directionRef.current === 'rtl') nextLogicalPage();\n      else previousLogicalPage();\n      return;\n    }\n\n    setChromeVisible",
+        "if (directionRef.current === 'rtl') previousLogicalPage();\n      else nextLogicalPage();\n      return;\n    }\n\n    setChromeVisible",'blank right tap')
+    text=text[:begin]+tap+text[end:]
+    text=once(text,'  if (!panResponderRef.current) {\n    panResponderRef.current = PanResponder.create({',
+        '''  if (!panResponderRef.current) {
+    let blankMultiTouch = false;
+    const observeBlankTouches = (event, state) => {
+      if ((event?.nativeEvent?.touches?.length ?? 0) > 1 || (state?.numberActiveTouches ?? 0) > 1) blankMultiTouch = true;
+    };
+    panResponderRef.current = PanResponder.create({''','blank sticky contact state')
+    text=once(text,'      onPanResponderRelease: (event, gestureState) => {\n        const {dx, dy, x0} = gestureState;',
+        '''      onPanResponderGrant: (event, state) => {blankMultiTouch = false; observeBlankTouches(event, state);},
+      onPanResponderStart: observeBlankTouches,
+      onPanResponderMove: observeBlankTouches,
+      onPanResponderEnd: observeBlankTouches,
+      onPanResponderRelease: (event, gestureState) => {
+        observeBlankTouches(event, gestureState);
+        if (blankMultiTouch || readerTransitionLocked() || renderingRef.current || pdfium.modalRef.current) return;
+        const {dx, dy, x0} = gestureState;''','blank multi-touch cancellation')
+    text=once(text,'      onPanResponderTerminate: () => {},',
+        '      onPanResponderTerminate: () => {blankMultiTouch = true;},','blank cancelled release')
+    # Keep both fingers routed to the original page's native touch owner, even
+    # if the second finger lands on its sibling. No Activity/global key hooks.
+    text=once(text,'          <View style={styles.spread}>',
+        '          <PdfiumTouchHost style={styles.spread}>','spread touch owner')
+    text=once(text,"          </View>\n        ) : Number.isInteger(display.singlePageIndex)",
+        "          </PdfiumTouchHost>\n        ) : Number.isInteger(display.singlePageIndex)",'spread touch owner close')
     text = once(text, "                  : savedInkProfile ? `${statusCover} · Ink unavailable for this page/view` : statusCover",
         "                  : savedInkProfile ? `${statusCover} · Ink unavailable for this page/view` : `${statusCover} · Saved ink is available in Edit, not this view`", 'parked ink notice')
     if text.count('<NativePdfPageView') != 3:

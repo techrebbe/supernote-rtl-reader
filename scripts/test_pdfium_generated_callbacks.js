@@ -8,6 +8,65 @@ const geometry=slice('  const readerKeyPageGeometry =','  readerKeyUiRef.current
 const setter=slice('  const setPageIndex = value => {','  const displayRef =');
 const fence=slice('  const fenceReaderKeys =','  const readerTransitionLocked =');
 const calls=[];
+// Actual generated physical taps must follow reading direction, independently
+// of the already-correct swipe mapping. Native page coordinates are not RN's
+// historically mirrored pageX coordinates used only by blank spread slots.
+{
+  const gestures=[];
+  const g={directionRef:{current:'rtl'},EDGE_ZONE:.28,TAP_SLOP:12,SWIPE_THRESHOLD:50,
+    readerTransitionLocked:()=>false,renderingRef:{current:false},pdfium:{modalRef:{current:false}},
+    nextLogicalPage:()=>gestures.push('next'),previousLogicalPage:()=>gestures.push('previous'),
+    setPageIndex:page=>gestures.push(['focus',page]),setChromeVisible:()=>gestures.push('chrome'),
+    pageAreaWidthRef:{current:1000},pageAreaLeftRef:{current:0}};
+  vm.createContext(g);
+  vm.runInContext(slice('  const handlePhysicalSwipe =','  const panResponderRef =')+
+    '\nglobalThis.blankTap=handlePhysicalTap;',g);
+  const match=app.match(/gesture: (event => \{[\s\S]*?\n    \}),\n  \}\);/);
+  assert.ok(match,'actual interactive callback must exist');
+  const gesture=vm.runInContext('('+match[1]+')',g);
+  for(const direction of ['rtl','ltr']){
+    g.directionRef.current=direction;
+    for(const [slot,fraction,expected] of [['single',.1,direction==='rtl'?'next':'previous'],
+      ['single',.9,direction==='rtl'?'previous':'next'],['left',.1,direction==='rtl'?'next':'previous'],
+      ['right',.9,direction==='rtl'?'previous':'next']]){
+      gestures.length=0;gesture({dx:0,dy:0,slot,fraction,pageIndex:0});
+      assert.deepEqual(gestures,[expected],direction+' physical '+slot+' tap');
+    }
+    for(const [dx,expected] of [[100,direction==='rtl'?'next':'previous'],[-100,direction==='rtl'?'previous':'next']]){
+      for(const fraction of [.5,-.3,1.3]){
+        gestures.length=0;gesture({dx,dy:0,slot:'single',fraction});assert.deepEqual(gestures,[expected],'swipe unchanged including crossing page edge');
+      }
+    }
+    gestures.length=0;g.blankTap(900);assert.deepEqual(gestures,[direction==='rtl'?'next':'previous'],'blank left RN-mirrored tap');
+    gestures.length=0;g.blankTap(100);assert.deepEqual(gestures,[direction==='rtl'?'previous':'next'],'blank right RN-mirrored tap');
+  }
+  gestures.length=0;gesture({dx:0,dy:0,slot:'single',fraction:.5,pageIndex:2});
+  assert.deepEqual(gestures,[['focus',2],'chrome']);
+  for(const change of [{dx:NaN},{dy:Infinity},{fraction:NaN},{fraction:1.1},{fraction:-.1}]){
+    gestures.length=0;gesture({dx:0,dy:0,slot:'single',fraction:.5,pageIndex:0,...change});assert.deepEqual(gestures,[]);
+  }
+  g.useRef=()=>({current:null});g.PanResponder={create:config=>config};
+  vm.runInContext(slice('  const panResponderRef =','  const setDirectionValue =')+
+    '\nglobalThis.blankResponder=panResponderRef.current;',g);
+  const blank=g.blankResponder;
+  const event=count=>({nativeEvent:{touches:Array(count).fill({}),pageX:900}});
+  const state=count=>({numberActiveTouches:count,dx:0,dy:0,x0:900});
+  g.directionRef.current='rtl';
+  for(const phase of ['onPanResponderStart','onPanResponderMove','onPanResponderEnd']){
+    gestures.length=0;blank.onPanResponderGrant(event(1),state(1));blank[phase](event(2),state(2));
+    blank.onPanResponderEnd(event(1),state(1));blank.onPanResponderRelease(event(0),state(0));
+    assert.deepEqual(gestures,[],'blank multi-touch stays cancelled after last finger lifts: '+phase);
+  }
+  gestures.length=0;blank.onPanResponderGrant(event(2),state(2));blank.onPanResponderRelease(event(0),state(0));
+  assert.deepEqual(gestures,[],'blank multi-touch already present at grant');
+  blank.onPanResponderGrant(event(1),state(1));blank.onPanResponderTerminate();blank.onPanResponderRelease(event(0),state(0));
+  assert.deepEqual(gestures,[],'terminated blank responder cannot later turn');
+  blank.onPanResponderGrant(event(1),state(1));blank.onPanResponderRelease(event(0),state(0));
+  assert.deepEqual(gestures,['next'],'fresh blank one-finger tap still works');
+  gestures.length=0;blank.onPanResponderGrant(event(1),state(1));
+  blank.onPanResponderRelease(event(0),{...state(0),dx:100});assert.deepEqual(gestures,['next'],'blank one-finger swipe unchanged');
+  console.log('Actual generated RTL/LTR edge taps, blank slots and unchanged swipes PASS');
+}
 const s={filePathRef:{current:'/test.pdf'},pageIndex:0,effectiveMode:'spread',direction:'rtl',coverSeparate:false,fatalError:null,
   totalPagesRef:{current:4},pageAreaWidthRef:{current:1000},renderTokenRef:{current:8},readerKeyPresentationRef:{current:null},
   pageIndexRef:{current:0},effectiveModeRef:{current:'spread'},coverSeparateRef:{current:false},directionRef:{current:'rtl'},

@@ -1,5 +1,16 @@
 # Next useful hardware batch — no speculative test loop
 
+## Immediate unblock: native synthetic PAGE1/footer, not another approval/build
+
+Availability confirmed;6247344165 preflight found USB/exact ordinary-shell target/
+power but another foreground application. STOPPED before capture/input/install;
+no scratch/stage to clean. Protected-data gates not reached. RELEASE6247354639,
+71 UNINSTALLED. User asked to finish the other app normally, leave the existing
+synthetic RTL_PDFIUM_T018IH1_20261015 PAGE1/native filename-page footer visible,
+free/untouched, and signal ready. Then NEW reservation/full preflight and approved
+exact71 test below. No reuse, owner bypass, unchanged build/review/emulator loop,
+timer resume or merge. No active device process.
+
 ## Ready71 gate: build/signature complete and approved; confirm availability
 
 Exact72d9a3e/exp12/code71 clean-archive normal build75tasks/SDK+JS32/full package/

@@ -1,5 +1,21 @@
 # RTL Reader hardware regression
 
+## 2026-10-18 — T019H1 preflight NOTPERFORMED; owner hard stop/released
+
+NEW issue23 reservation6247344165 after user availability confirmation. Exact
+candidate71/source72d9a3e/package85b1a967...e9f3dd6 unchanged. USB connection,
+unrooted3.30.45/API30 ordinary-shell target and sufficient charging power PASS.
+Current owner was not native disposable reader: STOP before capture, UI input,
+page/document/settings change, stage or installation. No remote scratch/local
+hardware evidence directory created; no cleanup targets. Protected-document hash
+and presentation gates NOT REACHED, not a complete integrity validation.
+
+71 UNINSTALLED; prior70 unchanged by this attempt, compatible rollback retained.
+No functional Fit/tap/swipe/pinch result. User asked for existing synthetic PAGE1
+native filename/page footer ready/free/untouched; NEW reservation/full preflight
+required, not a retry on the consumed reservation. RELEASE6247354639; no active
+process, raw/private/binary publication, root, timer resume or merge.
+
 ## 2026-10-18 — exact ergonomic71 package/signature PASS; device gate pending
 
 Executable72d9a3e66a9bcb1e59df2690507dc5b2658090f5 /0.4.25-pdfium-exp12/code71

@@ -1,5 +1,21 @@
 # STATE — RTL Reader (updated 2026-10-18 by codex)
 
+## Current71 hardware preflight stopped before installation; native fixture needed
+
+User confirmed availability; NEW reservation6247344165 checked USB connection,
+exact unrooted3.30.45/API30/ordinary shell and90% charging. Preflight STOPPED at
+another foreground application, not the native disposable reader. NOTPERFORMED:
+no capture/input/document/page/settings/stage/install, no remote scratch and no
+local hardware evidence directory. Protected-data hashes/presentation gates were
+NOT REACHED; no complete integrity or candidate hardware PASS claim.71 remains
+UNINSTALLED; retained70 rollback/candidate unchanged. RELEASE6247354639.
+
+User asked for existing synthetic RTL_PDFIUM_T018IH1_20261015 PAGE1/native footer
+visible/free/untouched. Await that readiness, then NEW reservation/exact preflight;
+do not reuse6247344165 or bypass owner hard stop. No unchanged offline gate loop,
+active device/build/test/review process, timer resume or merge. Earlier availability
+pending notes below are historical; exact installation approval remains in force.
+
 ## Current candidate71 built/verified; approved device tests await availability
 
 Exact72d9a3e66a9bcb1e59df2690507dc5b2658090f5 /exp12/code71 clean-archive normal

@@ -1,5 +1,14 @@
 # T018I — user-approved PDFium reader integration
 
+CURRENT hardware6247387845 exact72d9a3e/exp12/code71 normal manager/ON/runtime PASS.
+Portrait full white Fit, physical RTL taps1to2to1 and unchanged swipes1to2to1 PASS;
+one activation/five READY/no native-render-budget error. Reader and native PAGE1
+whole PNGs exact; protected originals/annotations/copies/public/rotation intact,
+60 captures+1stage cleaned/absence. RELEASE6247515695; installed71 retained/no
+process. Next already-approved NEW-reservation human pinch/Fit on same package,
+no reinstall/offline loop. No pinch/landscape/physical Bluetooth/writing/full-
+release acceptance yet; ink PARKED/timer PAUSED/no merge. Older pending text below.
+
 CURRENT exact72d9a3e66a9bcb1e59df2690507dc5b2658090f5 /exp12/code71 built and
 verified clean-archive75tasks/SDK+JS32/full package/same70 signer/provider11/no
 skips PASS. SNPLG85b1a9670dd4b04e20a0b1e9fd4f149e0883ac61cbaf2fe0f99924870e9f3dd6;

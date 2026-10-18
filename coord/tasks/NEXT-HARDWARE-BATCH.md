@@ -1,5 +1,16 @@
 # Next useful hardware batch — no speculative test loop
 
+## Next: SAME installed71, separately reserved human pinch/Fit
+
+Portrait gate PASS under6247387845/RELEASE6247515695: exact71 normal manager/ON,
+white full Fit, corrected physical RTL taps, unchanged forward/reverse swipes,
+five READY scenes, exact reader/native PAGE1 images, full integrity and61 owned
+file cleanup/absence. No current process. Do not repeat upgrade/portrait trial.
+Proceed to already-approved NEW reservation/preflight on same synthetic PAGE1,
+one modest real two-finger pinch in Read/Pan, intended page/anchor/no accidental
+navigation and Fit reset; normal Close/integrity/cleanup/release. Physical fingers
+required only once safe setup ready. No pen, original, ink/timer/merge work.
+
 ## Immediate unblock: native synthetic PAGE1/footer, not another approval/build
 
 Availability confirmed;6247344165 preflight found USB/exact ordinary-shell target/

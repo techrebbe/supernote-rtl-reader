@@ -1,5 +1,29 @@
 # RTL Reader hardware regression
 
+## 2026-10-18 — T019H1R1 ergonomic71 portrait PASS/released
+
+NEW6247387845, exact72d9a3e66a9bcb1e59df2690507dc5b2658090f5 /exp12/code71,
+SNPLG85b1a9670dd4b04e20a0b1e9fd4f149e0883ac61cbaf2fe0f99924870e9f3dd6
+normal manager upgrade from verified70/ON; exact71 runtime on unrooted3.30.45/API30.
+ONE activation/five current READY: portrait complete-page Fit, pure-white sampled
+side margins; left physical tap1to2/right2to1; positive RTL swipe1to2/negative2to1.
+No native/render/budget error. Reader PAGE1 PNG exactly restored; normal Close
+SDK-verified PAGE1 and native whole PNG exactly matches initial portrait scene.
+
+Protected originals/native annotations/disposable copies/public packages exact,
+test marks absent, actual rotation prefs unchanged.60 regular/nonlink/hash-backed
+captures+ONE exact unique stage removed individually/absence verified; local raw,
+copies/candidate/compatible70rollback retained. RELEASE6247515695,71 ON/no process.
+
+Setup qualifications retained locally: asynchronous Settings launch guard refused
+capture until expected activity settled; Settings Back returned known library,
+then explicit awaited public Settings launch used. No unknown/personal-app input.
+White pixel check initially included footer divider row1771/RGB119; offline check
+isolated it, then sampled only page margins rows173..1770, all RGB255. No integrity
+gate weakened. No physical pinch/current-package Bluetooth/landscape/pen/full-
+release/memory-leak claim. Next is separately reserved real-finger pinch/Fit on
+SAME71, not another installation/offline loop. Saved ink PARKED/no timer/merge.
+
 ## 2026-10-18 — T019H1 preflight NOTPERFORMED; owner hard stop/released
 
 NEW issue23 reservation6247344165 after user availability confirmation. Exact

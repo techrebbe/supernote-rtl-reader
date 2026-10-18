@@ -1,5 +1,20 @@
 # STATE — RTL Reader (updated 2026-10-18 by codex)
 
+## Current71 installed; portrait Fit/RTL taps/swipes PASS, released
+
+NEW6247387845 exact72d9a3e/exp12/code71 normal manager upgrade/ON/runtime PASS.
+Portrait complete white Fit; physical left tap1to2/right2to1; positive RTL swipe
+1to2/negative2to1 PASS. ONE activation/five current READY, no native/render/budget
+error. Reader PAGE1 and normal Close/native PAGE1 exact starting PNGs. Protected
+originals/annotations/disposable copies/public packages/sidecar absence exact;
+actual rotation preferences unchanged.60 captures+1stage removed/absence, local
+evidence/70rollback retained. RELEASE6247515695; no device process.71 remains ON.
+
+Next already-approved gate is separately reserved human two-finger pinch/Fit on
+same installed71/synthetic fixture. No reinstall/offline loop. This is portrait
+only, not pinch/physical Bluetooth/landscape/writing/full-release/memory acceptance.
+Saved ink PARKED, timer PAUSED/no merge. Prior pending/uninstalled text historical.
+
 ## Current71 hardware preflight stopped before installation; native fixture needed
 
 User confirmed availability; NEW reservation6247344165 checked USB connection,

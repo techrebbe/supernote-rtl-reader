@@ -2,6 +2,24 @@
 
 ## Current approved hardware checkpoint
 
+NOW actual-visibility gate FAIL, same106ec80/code72; R5 RELEASE6274679737. A save and
+persisted favourites chooser after Close/relaunch PASS. User followed B setup
+(native B context not independently captured) and selected A once. Current
+foreground is stock DocumentActivity; exact approved footer/PNG show A PAGE1/4.
+No fresh RTL OPENED/READY after second launch. Do not count cumulative older
+READY logs or SDK acknowledgements as current visibility. Callback/show phase
+and precise lifecycle cause remain UNKNOWN. No second open/relaunch/restart.
+
+Hard stop: no further functional hardware. User requested agent normal Close;
+amendment6274640656, fresh exactA PAGE1 guard then ONE Back reached verified
+Document library. Protected integrity/rotation/rollback PASS;31 owned captures
+and1installer removed once/absence verified, local backups kept. Device free,
+no process; use verified semantic navigation to avoid needless manual steps.
+Source-only supported SDK handoff investigation may
+continue, but no guessed delay/retry/root hook or new unreviewed package trial.
+Keep installed72,71rollback, saved synthetic favourite, test PDFs/local evidence.
+Any new hardware needs reviewed exact candidate/approval/new reservation; timer PAUSED.
+
 Checkpoint6274104551: visible exact72 runtime PASS under SAME held6272641827; one matching
 runtime marker, exact synthetic four-pageA nativePage1/readerPage1 OPENED and
 single-page READY. Retained XML/PNG shows SOURCE PAGE1/1-of-4, white portrait Fit,

@@ -1,5 +1,30 @@
 # RTL Reader hardware regression
 
+## 2026-10-19 — T020 favourite persists, but automatic RTL return FAIL
+
+Exact106ec80/0.4.25-library-exp1/code72/SNPLG3327f873...19d29d on unrooted3.30.45,
+same exclusive6272641827. Persisted chooser contains exact syntheticA after normal
+Close/relaunch; page1 SDK-verified normal Close observed. User set up B and chose
+A once. B starting context is user evidence, not an independent native capture.
+New RTL-owner guard failed before capture creation. Separate native-owner/approved
+footer XML and PNG show exactA PAGE1/4 in stock DocumentActivity. No fresh RTL
+OPENED/READY after second launch. Thus selected-document native open observed,
+required automatic RTL visibility FAIL, not a favourites feature acceptance.
+
+Cumulative log helper's old A/page READY is expressly NOT fresh-open evidence;
+current owner/capture and event ordering override its generic PASS wording. Exact
+SDK open callback/show execution/lifecycle cause and runtime call count remain
+unverified. No retry, RTL relaunch, native restart, pen, page turn or reinstall.
+Hard stop honored. At user's request, amendment6274640656 used fresh exactA
+PAGE1 footer/identity/owner then ONE normal Back: native Document library verified,
+no coordinates or second input. Final protected originals/annotations/copies/
+public packages/rotation/rollback integrity PASS, absent marks remain absent.
+32 exact regular/nonsymlink/hash/local-backed files (31 captures+1stage) removed
+once, absence verified; no PDFs/marks deleted. Local evidence, installed72,
+compatible71, synthetic PDFs and saved favourite retained. RELEASE6274679737;
+library restored/device free, no process. New reviewed/approved exact candidate
+and fresh reservation required before further functional hardware; timer PAUSED.
+
 ## 2026-10-19 — T020 exact72 startup/save confirmation PASS; direct-open pending
 
 Checkpoint6274104551, same held R5 reservation6272641827;0.4.25-library-exp1/code72

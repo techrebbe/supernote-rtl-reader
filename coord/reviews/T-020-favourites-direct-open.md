@@ -2,6 +2,19 @@
 
 ## Hardware gate status (not an additional review)
 
+2026-10-19 exact106ec80/code72 now tested under6272641827: startup, save notice
+and persisted chooser PASS, but required selected-book RTL visibility FAIL.
+After one user A selection, stock DocumentActivity shows exact disposableA PAGE1/4;
+no new RTL OPENED/READY follows second launch. Old cumulative A READY is not a
+fresh result. B starting context was user-reported; SDK callback/show execution
+and exact lifecycle cause unverified. The predeclared risk below is now an actual
+blocking hardware result, not source review acceptance or permission for retries.
+No further functional hardware. User-requested guarded one-Back restoration under
+6274640656 reached native library; protected integrity PASS,31 captures+1stage
+removed/absence, local evidence retained, RELEASE6274679737. No product change.
+Original independent source report remains unchanged, not retrospectively
+relabelled a new review. A correction needs its own focused tests/review/build.
+
 Current setup gate R3/release6271422662: display/input orientation disagreement
 after a misplaced Settings-row tap, before stage/install or settings changes.
 Product72/openFile/show remain untested. Local driver now rejects mismatched

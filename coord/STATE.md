@@ -1,5 +1,39 @@
 # STATE — RTL Reader (updated 2026-10-19 by codex)
 
+## Current T020: favourites visible-open FAIL; R5 RELEASE6274679737, cleanup PASS
+
+Same exact106ec80/code72/package3327f873...19d29d, reservation6272641827. Save
+acknowledgement and persisted chooser PASS: A remains listed after normal Close
+and second launch; normal Close logged page1 SDK-verified handoff. User followed
+two-pageB setup, then selected savedA once as requested. B's native context was
+user-reported, not independently captured underneath the chooser.
+
+Current owner guard rejected missing RTL foreground BEFORE new capture/input.
+Separate read-only native capture authenticates exact syntheticA filename/page1/4
+and SOURCE PAGE1 in stock DocumentActivity, not RTL Reader. No new RTL OPENED or
+READY after the second launch marker. The cumulative host runtime helper can pass
+the older A logs; that is NOT a fresh-open/visibility pass. Overall direct-open
+FAIL at the predeclared actual-visibility gate. Exact SDK callback/show phase and
+retirement cause remain UNKNOWN; one SDK call is source-enforced, not hardware-
+traced. No second selection, relaunch, restart, page/pen or workaround performed.
+
+User requested agent restoration rather than a manual Close. Confirmed cleanup-
+only amendment6274640656: fresh exactA PAGE1 footer/identity/owner, ONE normal
+KEYCODE_BACK, verified native Document library. No coordinates or second key.
+Protected originals/annotations, disposable/host copies, public packages, rotation
+and rollback integrity PASS; absent marks still absent.32 individually scoped,
+regular/nonsymlink/hash-backed remote files (31 captures+1stage, including fresh
+restoration XML) removed once and absence verified. Local evidence/installed72/
+71rollback, synthetic PDFs and savedA metadata retained. RELEASE6274679737; device
+free, no active observer/device/test/build/review process. Timer remains PAUSED.
+Use verified semantic normal navigation for later authorized steps; do not ask
+for manual actions when that safe known route suffices or guess touch coordinates.
+Source-only SDK inspection confirms show acknowledgement is posted-only and
+openFile has no exposed completion/visibility contract beyond its callback; do not
+invent a retry, delay or root workaround. New hardware needs a concrete reviewed
+correction/exact package and approval plus fresh reservation. No product change
+or rebuild yet; no further functional device use under consumed R5.
+
 ## Current T020:72 startup/save confirmation PASS; R5 held, reopen test next
 
 Checkpoint6274104551, SAME exclusive6272641827: exact72 runtime marker once after the

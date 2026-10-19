@@ -2,35 +2,32 @@
 
 A Supernote plugin focused on right-to-left PDF reading and landscape two-page spreads, designed especially for Hebrew books.
 
-## In preparation: favourite PDFs
+## Experimental favourite PDFs: automatic RTL return still blocked
 
-The next source change adds `Save to favourites` inside RTL Reader. On later RTL
-Reader launches, a book chooser can open one of those saved PDFs directly, or
+The experimental build adds `Save to favourites` inside RTL Reader. On later RTL
+Reader launches, a book chooser is intended to open a saved PDF directly, or
 continue with the currently open PDF. Supernote's own file list still opens its
 native reader; Edit and Close remain native too. This is an explicit fallback,
 not automatic interception of the system file list. Missing/replaced favourites
 are rejected rather than inheriting another document's saved position.
 
-Candidate0.4.25-library-exp1/code72 passed independent source/identity review and
-the normal exact-source package/signature gates. It is not installed or released.
-See [T020](coord/tasks/T-020-favourites-direct-open.md) for review/build and the
-smallest disposable-device test required before use.
+Candidate0.4.25-library-exp1/code72 (exact source106ec80) passed independent review
+and exact-source package/signature gates and is now installed experimentally.
+The disposable-device trial confirmed saving and persistence, but selecting a
+favourite opened the correct PDF in Supernote's native reader without returning
+to RTL Reader. Automatic direct-open is therefore NOT accepted for release.
+No retry/restart was used to hide this result. See [T020](coord/tasks/T-020-favourites-direct-open.md)
+for exact evidence, scope and remaining gate.
 
-The reviewed 25-file update is published through fc64026. The first approved
-device attempt stopped at the foreground-owner preflight, before capture,
-installation or document changes. Code72 remains uninstalled. A free Document
-library and a fresh reservation are required to resume; no new build is needed.
-
-A later library-ready attempt verified installed71 and staged the installer,
-but an unexplained return from Settings to the library stopped it before package
-selection. Temporary captures/installer were removed and data integrity passed;
-72 is still uninstalled. The clean second test PDF is retained for the next trial.
-
-Correction: the earlier return to the library followed our Back command closing
-Settings, not an established spontaneous reader failure. A later attempt stopped
-at disagreeing display/input orientation before staging or installation. Cleanup
-and integrity passed; portrait/still readiness and an aligned-input check are
-the next setup gate. The signed72 candidate itself is unchanged.
+The reviewed25-file update is published through fc64026; later evidence notes
+record installation and this result. Test reservation6272641827 was released in
+6274679737 after verified normal library restoration, protected-data integrity
+and removal of32 owned temporary capture/installer files. PDFs, annotations,
+local evidence and rollback are preserved. The saved synthetic test favourite is
+retained. Next is a supported handoff correction, followed by focused review and
+a newly approved exact candidate/reservation; do not repeat the failed hardware
+transition blindly. Earlier setup/input-orientation history remains in the task
+and regression notes. No root, firmware change or merge is implied.
 
 ## Current priority: interactive original-PDF reading
 

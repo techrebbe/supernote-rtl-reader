@@ -31,6 +31,18 @@ scope legitimate. No build/native/SDK/signing/permission/writer/Edit/Close chang
 Ready for exact candidate build/bounded hardware AFTER package/approval gates,
 not installed identity, hardware success or permission to reuse consumed R5.
 
+### Exact package checkpoint (main verification, not another source review)
+
+Exact source4ae7c20308059525fd8d4d63304b836f2f0ea576, clean archive normal build
+exit0/75tasks; source/DEX/ELF/engine/notices/corrected bundle/new phase markers/
+package PASS. Actual-APK provider11 PASS/no skips; v2/v3 certificate independently
+matches retained72/71.73/library-exp2 SNPLG SHA256:
+b79a3f6bf25716f0e44519b25924c4c943e9dd2b0c64201bd955b9476ba21b47.
+No source change after review; identity receipt27 normalized input aggregate
+cf322c23bd5324cc98c91925431a018c257b40e3fec61895b2b828ae6e358331.
+No install/device access/publication. Ready for the defined bounded real-device
+gate after explicit approval/fresh reservation/preflight. No extra emulator loop.
+
 ## Hardware gate status (not an additional review)
 
 2026-10-19 exact106ec80/code72 now tested under6272641827: startup, save notice

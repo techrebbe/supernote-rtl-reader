@@ -11,8 +11,13 @@ still precede any PDF render. Phase records do not claim actual visibility.
 Independent correction and ten-file identity/pin reviews CLEAN. Actual controller/
 JSX30 and combined JS244 PASS; native library109, integration9, core85407/all271
 mutations, native/v2/cross-layer/Edit/packaging/wiring6 and SDK forwarding PASS.
-Exact73/library-exp2 package build/signature is next; no install/device access,
-publication, merge or new hardware result. Prior72 FAIL/release evidence below
+Exact73/library-exp2 source4ae7c20 normal clean archive build exit0/75tasks, source/
+DEX/ELF/engine/notices/bundle/package and actual-APK provider11 PASS/no skips.
+SNPLG b79a3f6bf25716f0e44519b25924c4c943e9dd2b0c64201bd955b9476ba21b47,
+v2/v3 signer fac61745...1033b9c matches retained72/71. Current-attempt log gate9
+rejects old READY/manual reactivation, not a substitute for live UI proof.
+No install/device access, publication, merge or new hardware result. Exact test/
+publication approvals requested;73 UNINSTALLED. Prior72 FAIL/release evidence below
 is retained, not overwritten by source tests. Original PDFs/annotations untouched.
 
 ## 2026-10-19 — T020 favourite persists, but automatic RTL return FAIL

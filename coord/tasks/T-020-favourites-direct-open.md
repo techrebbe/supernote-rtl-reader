@@ -2,7 +2,29 @@
 
 ## Current approved hardware checkpoint
 
-### Return correction73: offline ready for exact build, no new hardware approval
+### Return correction73: exact package ready, approval/availability pending
+
+Executable4ae7c20308059525fd8d4d63304b836f2f0ea576, clean archive normal build
+exit0/75tasks. Output local tmp/t020r-return-4ae7c20-build1/out/SupernoteRtlReader.snplg.
+Exact identity receipt at that build root:0.4.25-library-exp2/code73, unchanged
+pluginID snrtl20260726001/package com.supernotertlreader/SDK0.1.65/min27/target35.
+Android native manifest1.0/code1 intentionally unchanged.
+
+- SNPLG: b79a3f6bf25716f0e44519b25924c4c943e9dd2b0c64201bd955b9476ba21b47
+- APK: f3eee2c29bc178a99f2444a1e7500598aa8f0fb7a83a879fc4143ddbead082d5
+- Bundle: 9e457434280a75fafdadd6ca6e5abc6eef1a59e17522f239e27bc5df96e8df5f
+- Source archive: b55c58beeb7d08b4bb92ec64ef00bac2625a273a9ba97d3edbe924fd8cd20a2d
+- 27-input LF aggregate: cf322c23bd5324cc98c91925431a018c257b40e3fec61895b2b828ae6e358331
+- v2/v3 signer: fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c
+
+Source receipt/DEX/ELF/engine/notices/corrected bundle/new phase markers/outer
+package PASS; actual-APK provider11 PASS/no skips. Signer independently matches
+retained72 and71 packages; no current installed certificate extraction claimed.
+Current-attempt host log gate9 PASS, explicitly rejects stale cumulative READY;
+live UI still mandatory.73 UNINSTALLED and unpublished; no device access/process.
+User asked exact install/bounded test and separate public15-file/same-five-note
+summary approval. Availability/free exclusivity must also be confirmed. Timer
+PAUSED; no merge/PR finalization. Do not consume the old R5 reservation.
 
 User requested fix/next-test readiness. Minimal source correction resumes the
 hidden RN host with the SAME single supported SDK show immediately after the
@@ -23,8 +45,8 @@ controller/JSX30, combined current JS244, native library109, integration9,
 core85407/all271 mutations and native/v2/cross-layer/Edit/packaging/wiring6/SDK
 gates pass. Independent source and identity/frozen-pin reviews CLEAN. Version
 0.4.25-library-exp2/code73/runtime marker consistent; index/workflow change
-ONLY identity tokens and exact two digest expectations. Exact package next;
-not built, installed or published. Device remains released; timer PAUSED.
+ONLY identity tokens and exact two digest expectations. Exact package is now
+verified above, not installed or published. Device remains released; timer PAUSED.
 
 Earliest next hardware: reviewed exact compatible-signed73, explicit install/test
 approval, fresh issue23 reservation and exact disposable/source/power preflight.

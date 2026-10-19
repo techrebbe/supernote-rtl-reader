@@ -1,6 +1,24 @@
 # STATE — RTL Reader (updated 2026-10-19 by codex)
 
-## Current T020 return correction:73 source reviewed/tested; exact build next
+## Current T020 return correction: exact73 package READY; approval/availability next
+
+Exact executable4ae7c20308059525fd8d4d63304b836f2f0ea576, normal clean archive
+build exit0/75tasks. Package0.4.25-library-exp2/code73 verified locally:
+SNPLG b79a3f6bf25716f0e44519b25924c4c943e9dd2b0c64201bd955b9476ba21b47.
+Native app.npk f3eee2c29bc178a99f2444a1e7500598aa8f0fb7a83a879fc4143ddbead082d5;
+bundle9e457434280a75fafdadd6ca6e5abc6eef1a59e17522f239e27bc5df96e8df5f.
+v2/v3 signer fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c
+matches retained72/71.27 source inputs/archive/source receipt/DEX/ELF/engine/
+notices/new marker+phase labels/bundle/package gates PASS; actual-APK provider11
+PASS/no skips. Candidate receipt local tmp/t020r-return-4ae7c20-build1.
+
+Nonshipping current-attempt log gate9 cases PASS, rejecting old READY, missing/
+duplicated phases, wrong document/request and manual reactivation as false return
+success. Live current RTL window/exact-book image remains independently required.
+No device access;73 UNINSTALLED,72 retained/last verified installed. Explicit
+questions sent for exact installation/bounded test and public15-file correction/
+same-five-note summaries. Await answers and actual free/connected readiness;
+no test/reservation/upload automatically inferred. No active process; timer PAUSED.
 
 User requested fixing automatic return and notification when next Nomad test is
 ready. Installed72 remains untouched; prior R5 released6274679737, timer PAUSED.
@@ -28,8 +46,8 @@ restore exact prior index/workflow content and frozen LF digests. Current244 JS,
 native library109 assertions, integration9, core85407/all271 mutations, native/
 v2/cross-layer/Edit/packaging/wiring6 and pinned SDK forwarding PASS. An initial
 generated-test invocation lacked explicit Python/arguments; corrected invocation
-passes, no production gate weakened. Exact clean-source compatible package is
-NEXT,73 not built/installed or published. Keep72/71 packages and all evidence.
+passes, no production gate weakened. Exact clean-source package now verified
+above.73 uninstalled/unpublished; keep72/71 packages and all evidence.
 
 ## Current T020: favourites visible-open FAIL; R5 RELEASE6274679737, cleanup PASS
 

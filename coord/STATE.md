@@ -1,5 +1,35 @@
 # STATE — RTL Reader (updated 2026-10-19 by codex)
 
+## Current T020 R5 HELD for human installation; checkpoint6272800674
+
+R4 reservation6272586099 consumed/released6272630477 before captures/input.
+Local ADB client/server negotiation restarted the host daemon; old WLAN address
+unreachable. USB exact target/ordinaryUID2000/3.30.45/API30 exposed current WLAN
+address/already-enabled5555; exact serial/firmware then verified over Wi-Fi.
+USB accessory dialog blocked preflight; no dialog input, new metadata directory,
+remote scratch or full integrity/alignment claim. User subsequently replied ready.
+
+R5 actual reservation6272641827 ACTIVE/EXCLUSIVE, not released. Fresh metadata/
+library/protected/public/rotation/power PASS over current verified Wi-Fi (address
+only in local metadata). Portrait-ready still gives display/XML0/input3 mismatch.
+No coordinate input/guessed transform. Approved exact106ec80/code72 stage in
+MyStyle at unique reservation path, SHA3327f873...19d29d verified;71rollback kept.
+
+User asked agent to select installer. Amendment6272702968: keyboard-only attempt
+sent11 TABs, each uniquely observed, reaching exact ll_applications; ONE ENTER did
+not open Apps (result remains My Account). No second activation/DPAD guess, setting
+toggle, package selection/install, document/page/pen operation.72 UNINSTALLED.
+User now asked for normal manual Apps/Plugins/package selection, expected
+0.4.25-library-exp1 ON detail and reply installed. No active process/observer.
+
+Local raw/receipts at tmp/t020h-library72-6272641827-20261019;21 owned COMPLETE
+receipts:20captures+1stage intentionally remain pending final cleanup. Do not
+remove the installer while user is selecting it. Clean syntheticB/rollback kept.
+Next ONLY after human step: exact installed detail/runtime verification, then
+bounded disposable favourites flow. If device use changes, re-establish authority/
+integrity; never treat held stage as installed or cleanup complete. Timer PAUSED,
+ink PARKED/pinch OPEN/no merge. No unchanged rebuild or speculative test loop.
+
 ## Current T020: input-frame gate; R3 RELEASE6271422662,72 UNINSTALLED
 
 R2 NEW6271257410 consumed/released6271345230. CORRECTION to R1/R2 reports below:

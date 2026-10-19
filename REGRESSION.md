@@ -1,5 +1,28 @@
 # RTL Reader hardware regression
 
+## 2026-10-19 — R4 connection recovery; R5 awaits manual installer, not installed
+
+R4 reservation6272586099 RELEASE6272630477: no captures/input/stage. Local ADB
+version negotiation restarted host daemon; old Wi-Fi endpoint unreachable. USB
+exact target identity exposed new WLAN address/port5555, then independently
+verified over Wi-Fi. SystemUI accessory dialog stopped further preflight; no
+dialog dismissal or full integrity/alignment claim. No remote scratch to clean.
+
+R5 reservation6272641827 remains HELD for manual installer selection, checkpoint
+6272800674. Fresh exact ordinary target/library/power/protected/public/rotation
+checks PASS. Live portrait/still check remains display/XML0 versus input3; no
+coordinate tap/guessed transform. Exact approved72 installer3327f873...19d29d
+staged/hash verified; cleanB/71rollback retained.
+
+At user's request, recorded amendment6272702968 tried keyboard-only selection:
+11 TAB moves exposed unique focus through exact Apps ll_applications; ONE ENTER
+did not open Apps (result still My Account). No guessed second activation,
+settings toggle, package selection/install, document/page/pen action. Manual
+normal package selection requested; leave exact0.4.25-library-exp1 ON detail.
+72 UNINSTALLED, no active process/observer.20 capture receipts+1installer stage
+remain deliberately pending final cleanup, locally hash-backed; not a completed
+hardware pass or cleanup. No rebuild/merge/root/private artifact upload.
+
 ## 2026-10-19 — T020 R1/R2 correction; R3 input-frame hard stop, cleanup PASS
 
 R2 reservation6271257410 RELEASE6271345230: actual host script/event traces prove

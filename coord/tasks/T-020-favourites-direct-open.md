@@ -2,6 +2,17 @@
 
 ## Current approved hardware checkpoint
 
+CURRENT R5 reservation6272641827 HELD, checkpoint6272800674, manual installation
+required. Fresh current-Wi-Fi preflight PASS; portrait-ready still display0/input3
+mismatch. Exact72 package staged/hash verified. Bounded keyboard attempt (user
+requested/amendment6272702968) reached exact Apps focus after11 TABs; ONE ENTER
+did not activate Apps. No coordinate compensation/retry/settings toggle/install.
+User asked to choose the staged package normally and leave expected72 ON detail.
+No observer/process;20captures+1stage await final cleanup. Do not delete the stage
+while user is selecting it. Read-only installed verification follows human reply.
+R4 released6272630477 after WLAN recovery/accessory-dialog stop; private endpoint
+only local. Same exact candidate/rollback, no rebuild or extra software review.
+
 CURRENT R3 RELEASE6271422662,72 UNINSTALLED: wrong Settings-page result stopped
 before stage/install/toggles; display rotation0 and input orientation3 disagree.
 No causal transform proved or compensating input. Protected files/settings exact,

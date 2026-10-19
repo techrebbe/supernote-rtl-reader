@@ -1,5 +1,21 @@
 # RTL Reader hardware regression
 
+## 2026-10-19 — exact72 manual installation/ON verified; runtime test pending
+
+R5 reservation6272641827 remains exclusive/held, checkpoint6273859271. User manual
+normal installation followed by read-only manager evidence: RTL Reader unique
+Version0.4.25-library-exp1 and ON. Exact ordinary-shell Wi-Fi target/firmware
+verified; retained selected-stage SNPLG3327f873...19d29d and candidate/71rollback
+hashes exact. Installed native payload not independently extracted; matching
+signer evidence is the previously verified exact candidate/retained71, not a new
+device certificate read. No runtime/native library/favourites PASS yet.
+
+Device-time log boundary retained before first launch. User asked to open only
+the four-page syntheticA PAGE1 and launch RTL normally, leaving view/chooser/error
+untouched without saving a favourite/page/pen action. Next exact runtime/source/
+visible-render check; no observer process or unnecessary rebuild. Owned captures
+and installer intentionally remain pending final integrity/cleanup/release.
+
 ## 2026-10-19 — R4 connection recovery; R5 awaits manual installer, not installed
 
 R4 reservation6272586099 RELEASE6272630477: no captures/input/stage. Local ADB

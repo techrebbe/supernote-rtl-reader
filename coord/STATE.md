@@ -1,5 +1,24 @@
 # STATE — RTL Reader (updated 2026-10-19 by codex)
 
+## Current T020:72 installed/ON VERIFIED; R5 held, first runtime gate pending
+
+User manually installed the exact staged package and reported installed. Same
+active exclusive reservation6272641827; checkpoint6273859271. Read-only current
+Wi-Fi/exact serial/ordinaryUID2000/firmware verification and manager capture show
+unique RTL Reader Version0.4.25-library-exp1 ON. Retained SNPLG3327f873...19d29d
+and local candidate/71rollback exact. Local installation-verified.json records
+outer identity/signing provenance; installed native payload NOT extracted.
+
+Local ADB daemon renegotiated client version before device access; reconnect to
+the same USB-observed current WLAN endpoint succeeded. No new input/install.
+Before any reader launch, device-time boundary saved in activation-start.json.
+User asked to open ONLY synthetic four-pageA PAGE1, launch RTL Reader normally,
+leave visible without favourite/page/pen action, or report untouched chooser/error.
+Exact72 runtime marker/native library/current-source/render are NEXT gates, not
+inferred from manager version. No active observer/device/build/test/review process.
+Own captures/installer still deliberately await final cleanup; reservation held.
+No rebuild, root/firmware, private artifact upload, timer resume or merge.
+
 ## Current T020 R5 HELD for human installation; checkpoint6272800674
 
 R4 reservation6272586099 consumed/released6272630477 before captures/input.

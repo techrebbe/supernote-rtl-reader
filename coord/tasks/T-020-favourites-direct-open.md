@@ -2,6 +2,14 @@
 
 ## Current approved hardware checkpoint
 
+NOW72 installed/ON manually and manager/source-stage verified, checkpoint
+6273859271 under SAME active6272641827. Source106ec80/package3327f873...19d29d
+unchanged; local candidate/71rollback exact. Installed native payload not extracted;
+actual runtime/new native library and first visible source are pending. User asked
+to open synthetic four-pageA PAGE1/launch RTL and leave view or error untouched,
+without favourite/page/pen action. Device-time log boundary retained; no observer
+process. Capture/stage cleanup remains pending. No reinstall/rebuild prerequisite.
+
 CURRENT R5 reservation6272641827 HELD, checkpoint6272800674, manual installation
 required. Fresh current-Wi-Fi preflight PASS; portrait-ready still display0/input3
 mismatch. Exact72 package staged/hash verified. Bounded keyboard attempt (user

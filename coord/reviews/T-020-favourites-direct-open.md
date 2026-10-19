@@ -2,6 +2,14 @@
 
 ## Hardware gate status (not an additional review)
 
+Current setup gate R3/release6271422662: display/input orientation disagreement
+after a misplaced Settings-row tap, before stage/install or settings changes.
+Product72/openFile/show remain untested. Local driver now rejects mismatched
+frames (13 offline cases PASS), no production correction/rebuild inferred.
+R1/R2 return-to-library was caused by the host's normal Back closing Settings,
+not an independently established spontaneous change. Prior no-input wording
+is corrected by actual host/event evidence; do not treat it as a reader defect.
+
 H1R1 reservation6270552551 also stopped before package selection/installation
 after an uncommanded foreground change; RELEASE6270642388, integrity/owned scratch
 cleanup PASS. Installed71 verified ON; exact72 still uninstalled. This is not a

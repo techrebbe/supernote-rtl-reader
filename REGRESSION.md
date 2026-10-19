@@ -1,5 +1,39 @@
 # RTL Reader hardware regression
 
+## 2026-10-19 — T020 R1/R2 correction; R3 input-frame hard stop, cleanup PASS
+
+R2 reservation6271257410 RELEASE6271345230: actual host script/event traces prove
+KEYCODE_BACK WAS sent after staging; Settings finished app-request and returned
+to library. The subsequent capture stopped. Same trace exists for R1. Earlier
+claims that no Back input occurred were wrong; no spontaneous/outsider/reader
+cause attribution is justified. Settings subpage return requires the displayed
+ic_arrow_left, not hardware Back. No72/openFile/show call occurred. R2 integrity
+PASS;10 captures+1stage removed/absence, cleanB/evidence/rollback retained.
+
+R3 reservation6271346380 RELEASE6271422662: fresh target/library/protected/public/
+rotation/power preflight PASS over verified Wi-Fi. One observed RTL Reader row
+tap instead reached Security & Privacy; exact71 version check rejected BEFORE
+stage/install/settings toggle/PDF activation. Retained intended row bounds:
+517,1512,690,1552. Later read-only display rotation0/1404x1872 versus input
+Viewport/SurfaceOrientation3 disagree; causal mapping UNPROVEN. No compensating
+tap. Local test-driver frame gate now rejects this mismatch;13 offline actual-
+guard cases and syntax PASS. No product source or exact72 package change.
+
+R3 protected originals/annotations/existing and cleanB copies/public packages
+exact, marks absent, rotation preferences unchanged. Direct library activity
+start denied/not exported; no retry/bypass. ONE normal Back intentionally closed
+Settings to known library, without coordinates/settings switch/document launch.
+10 regular/nonlink/local-backed captures removed/absence; no installer stage.
+72 UNINSTALLED, last verified71 ON inR2. No active device/test/build/review process.
+User asked for portrait/still readiness; next NEW reservation and live input/
+display alignment before scripted taps, or human package selection if uncertain.
+
+One earlier rejected reservation post was mistakenly followed by read-only
+preflight at unverified ID6270720531. That local baseline is marked INVALID,
+never reused/accepted. No capture, mutation or remote scratch occurred. R2/R3
+used actual successful coordination receipts; no unnecessary private detail was
+published. This process error is not a reader/build/test PASS.
+
 ## 2026-10-19 — T020H1R1 NOTPERFORMED; pre-install owner change, cleanup PASS
 
 Fresh6270552551 after user library-ready. Exact target/ordinary shell/3.30.45/

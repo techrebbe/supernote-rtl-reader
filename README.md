@@ -26,6 +26,12 @@ but an unexplained return from Settings to the library stopped it before package
 selection. Temporary captures/installer were removed and data integrity passed;
 72 is still uninstalled. The clean second test PDF is retained for the next trial.
 
+Correction: the earlier return to the library followed our Back command closing
+Settings, not an established spontaneous reader failure. A later attempt stopped
+at disagreeing display/input orientation before staging or installation. Cleanup
+and integrity passed; portrait/still readiness and an aligned-input check are
+the next setup gate. The signed72 candidate itself is unchanged.
+
 ## Current priority: interactive original-PDF reading
 
 The current direction is an unrooted, dedicated RTL reading view that opens the

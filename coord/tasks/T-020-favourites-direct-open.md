@@ -2,6 +2,20 @@
 
 ## Current approved hardware checkpoint
 
+CURRENT R3 RELEASE6271422662,72 UNINSTALLED: wrong Settings-page result stopped
+before stage/install/toggles; display rotation0 and input orientation3 disagree.
+No causal transform proved or compensating input. Protected files/settings exact,
+10 captures removed/absence; normal Back intentionally closed Settings to library.
+Wait for portrait/still readiness, NEW reservation and live alignment check before
+scripted taps; use human package selection if still uncertain. Local frame guard
+13 offline cases PASS; no product/package change or rebuild needed.
+
+CORRECTION: R1/R2 did send KEYCODE_BACK, which closed Settings; the NEXT capture
+guard stopped. Actual script/event traces establish this, superseding earlier
+no-Back/unknown-return statements. Use observed ic_arrow_left for subnavigation.
+R2 cleanup/release6271345230 complete. Invalid unconfirmed baseline6270720531
+never accepted/reused; actual R2/R3 receipts checked before subsequent access.
+
 LATEST: H1R1 NEW6270552551 consumed/released6270642388. Metadata integrity/power/
 library checks PASS; normal manager verified71 ON. Exact72 installer and clean
 two-pageB staged, then owner changed to library before Back; guard stopped before

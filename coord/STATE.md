@@ -1,5 +1,39 @@
 # STATE — RTL Reader (updated 2026-10-19 by codex)
 
+## Current T020: input-frame gate; R3 RELEASE6271422662,72 UNINSTALLED
+
+R2 NEW6271257410 consumed/released6271345230. CORRECTION to R1/R2 reports below:
+host DID send KEYCODE_BACK after staging. SettingsActivity finished app-request
+and returned to library; the FOLLOWING capture guard stopped. Actual host control
+flow/event traces corroborate R1 at18:14:08 and R2 at18:49:51. Earlier no-Back/
+spontaneous-owner claims were wrong; do not attribute this sequence to outsiders
+or reader/openFile behavior. Correct Settings subnavigation uses displayed
+ic_arrow_left; normal Back is appropriate only when intentionally closing Settings.
+R2 originals/settings/public/copies exact,10 captures+1stage cleaned/absence.
+
+R3 NEW6271346380 reused exact approved106ec80/code72/unchanged package and cleanB.
+Fresh metadata/library checks PASS, Wi-Fi target verified. An observed RTL Reader
+row tap instead reached Security & Privacy; exact71 guard rejected before staging,
+install or any setting toggle. Read-only diagnostics: display rotation0/1404x1872
+versus input Viewport/SurfaceOrientation3. Mismatch observed; causal transform NOT
+proven, no compensating tap or guessed mapping. Source-only local driver now blocks
+display/input/XML-frame mismatch and Settings Back subnavigation, records numeric
+tap requests;13 actual frame-guard tests and syntax PASS. No reader source/build
+change, no new hardware acceptance. User asked for portrait/still readiness.
+
+R3 protected originals/marks/copies/public/rotation exact, expected marks absent.
+Direct library activity start denied/not exported, not retried; ONE ordinary Back
+intentionally closed Settings to known library.10 captures cleaned/absence; no
+stage; raw/cleanB/candidate/71rollback retained. RELEASE6271422662, no active process.
+Next portrait-ready signal -> NEW reservation -> read-only live alignment gate;
+if still uncertain, human installer selection, not guessed taps.72 UNINSTALLED,
+last verified71 ON inR2. Timer PAUSED/ink PARKED/pinch OPEN/no merge.
+
+Process qualification: one earlier reservation post was rejected; orchestration
+erroneously ran read-only preflight before checking success. Unverified local
+baseline6270720531 marked INVALID, never reused/claimed; no capture/mutation/scratch.
+SubsequentR2/R3 used actual successful issue receipts. No private detail published.
+
 ## T020H1R1 stopped before package selection; RELEASE6270642388
 
 Fresh user library-ready signal -> NEW6270552551. Exact ordinary Nomad3.30.45/

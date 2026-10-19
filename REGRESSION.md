@@ -1,5 +1,23 @@
 # RTL Reader hardware regression
 
+## 2026-10-19 — exact T020 code72 package verified; hardware NOT PERFORMED
+
+Source106ec80e566adce8555ab69fd94e6745c7708116 /0.4.25-library-exp1/code72 normal
+clean archive build attempt2 exit0/75tasks. SDK0.1.65/JS58/full source-DEX-ELF-
+engine-notices-bundle/package gates and actual-APK provider11 PASS. Independent
+source and exact identity/pin reviews CLEAN.27-input reviewed aggregate exact.
+Package com.supernotertlreader, pluginID snrtl20260726001, matching71 v2/v3 signer
+fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c.
+SNPLG3327f873c7436a7e183a9648395fa4352aebcae236b2cf6115b07498e119d29d;
+APK656f4c1653b3b0c771671cf2227403aff72168b4ba33250c5436f8af5ab51693.
+Private local candidate identity receipt retains all archive/bundle/source hashes.
+
+Attempt1 failed in stock SDK CMake/Ninja after Windows object-path warnings; exact
+same source succeeded under a shorter temporary root. Both logs retained; no
+reader workaround/SDK change/gate weakening. No Nomad access, install, upload,
+pen, original/annotation access or merge. First visible favourites-open evidence
+still requires exact approval/new exclusive reservation/disposable preflight.
+
 ## 2026-10-19 — T020 source review CLEAN, not a hardware pass
 
 Favourites/direct-open implementation plus0.4.25-library-exp1/code72 identity/pins

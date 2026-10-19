@@ -11,7 +11,8 @@ native reader; Edit and Close remain native too. This is an explicit fallback,
 not automatic interception of the system file list. Missing/replaced favourites
 are rejected rather than inheriting another document's saved position.
 
-This feature is local source preparation, not installed/released functionality.
+Candidate0.4.25-library-exp1/code72 passed independent source/identity review and
+the normal exact-source package/signature gates. It is not installed or released.
 See [T020](coord/tasks/T-020-favourites-direct-open.md) for review/build and the
 smallest disposable-device test required before use.
 

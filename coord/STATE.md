@@ -1,5 +1,27 @@
 # STATE — RTL Reader (updated 2026-10-19 by codex)
 
+## T020 exact72 package built/verified; publication and hardware approval gate
+
+Executable106ec80e566adce8555ab69fd94e6745c7708116 /0.4.25-library-exp1/code72:
+independent implementation and exact identity/pin reviews CLEAN. Normal clean
+archive build attempt2 exit0/75tasks, SDK forwarding/JS58 and full source/DEX/ELF/
+engine/notices/bundle/package/signature PASS; actual-APK provider11/no skips PASS.
+27-input reviewed aggregate9840778312d78d31bcf212fde9f33804cc00561b7a7de0b807b5abd8841e63e9.
+SNPLG3327f873c7436a7e183a9648395fa4352aebcae236b2cf6115b07498e119d29d;
+APK656f4c1653b3b0c771671cf2227403aff72168b4ba33250c5436f8af5ab51693.
+v2/v3 signer matches retained71, identity receipt local. First attempt failed in
+stock SDK CMake/Ninja after path-length warnings; shorter temporary root fixed
+the build, with exact same reviewed source. Both logs/archives retained.
+
+UNINSTALLED, no Nomad access/reservation, publication, timer resume or merge.
+No build/test/device task active. Next gate: explicit25-file+same-five-note result
+publication/issue23 coordination approval and exact72 installation/disposable
+favourites test approval/current exclusive availability. First hardware question
+is actual retained-context/visible exact-book RTL reopening after one SDK open;
+show acknowledgement alone is insufficient.71/70 rollback retained, originals
+untouched, saved ink PARKED; existing pinch budget failure remains OPEN. Older
+unbuilt/pending-review paragraphs below are historical.
+
 ## T020 source and exact72 identity independently CLEAN; local build next
 
 User approved independent source review. Reviewer found no confirmed actionable

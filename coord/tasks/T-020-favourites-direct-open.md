@@ -12,7 +12,27 @@ User explicitly selected **favourites/direct-open fallback**. Implemented source
 is based on2d815e7e7a2531b427e702c5d3056730260fa6c7. Initial independent source
 review and exact identity/pin follow-up are CLEAN; see the review note in
 coord/reviews. Candidate0.4.25-library-exp1/code72 is UNBUILT/UNINSTALLED at this
-checkpoint, not published. Last-verified installed71 and rollback70 retained.
+initial checkpoint, not published. Last-verified installed71 and rollback70 retained.
+
+### Completed local candidate build
+
+Exact source106ec80e566adce8555ab69fd94e6745c7708116, normal clean archive attempt2
+exit0/75tasks/SDK0.1.65 and JS58. Full package/source/DEX/ELF/engine/notices/bundle
+verification PASS, including new library class/store/UI. Actual-APK provider11
+PASS/no skips. Package com.supernotertlreader, pluginID snrtl20260726001; outer72,
+Android native manifest1.0/code1 is deliberate/unchanged. v2/v3 signer SHA256:
+fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c, matching retained71.
+
+- SNPLG:3327f873c7436a7e183a9648395fa4352aebcae236b2cf6115b07498e119d29d
+- APK:656f4c1653b3b0c771671cf2227403aff72168b4ba33250c5436f8af5ab51693
+- Bundle:9d8913bf3bc8937f3862cc370aced9fca3b34b2c315f2810e276624a103614c4
+- Source archive:5064a12b2b27f417d3a303c5fd48ae8ec1c090a5ad992734bd9d41e1e9892011
+
+First attempt failed in stock SDK CMake/Ninja (long object paths, dirty manifest
+after100 regenerations). Retained evidence; same source succeeded using a shorter
+temporary root. No production fix, dependency update or weakened gate was used.
+Candidate/identity receipt local under tmp/t020-library-106ec80-build2. Not uploaded
+or installed; no device accessed. Local build failure is not a device failure.
 
 ## User flow
 
@@ -75,9 +95,9 @@ all native/v2/cross-layer/Edit/wiring checks passed. No frozen preference/native
 writer source or signing/SDK/permission pin changed.27-input source aggregate is
 9840778312d78d31bcf212fde9f33804cc00561b7a7de0b807b5abd8841e63e9.
 
-Next: normal exact clean-source compatible-signed package. Publication/install
-require their own scope approval; no upload or hardware action has happened for
-T020. No additional speculative emulator prerequisite is needed.
+Normal exact clean-source compatible-signed package is now verified above.
+Publication/install require their own scope approval; no upload or hardware action
+has happened for T020. No additional speculative emulator prerequisite is needed.
 
 ## Earliest safe hardware gate
 

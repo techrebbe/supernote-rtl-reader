@@ -73,3 +73,17 @@ LF-text source map aggregate (SHA256 of sorted compact JSON):
 No finding blocks local build preparation. Built-package signer, actual visible
 reopen and hardware behavior still need their own evidence. No reviewer mutation,
 build, device access or publication occurred.
+
+## Main build evidence after review
+
+Exact source106ec80e566adce8555ab69fd94e6745c7708116 normal clean-source build
+attempt2 exited0/75tasks; SDK+JS58, complete package/source/DEX/ELF/engine/notices/
+bundle gate and actual-APK provider11 PASS. Main separately verified27 source
+inputs/aggregate, library class/private-store/UI presence and exact marker. v2/v3
+signer fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c
+matches retained71. SNPLG3327f873c7436a7e183a9648395fa4352aebcae236b2cf6115b07498e119d29d.
+
+Attempt1 stock-SDK CMake/Ninja path failure was retained; same source succeeded
+with a shorter temporary root, no production change or gate bypass. This evidence
+is main verification after source review, not a separate reviewer claim of building
+or testing the Nomad. No hardware, installation or publication has occurred.

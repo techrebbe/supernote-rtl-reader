@@ -12,7 +12,7 @@ from pdfium_elf import verify_wrapper
 from pdfium_provider import generate as provider_header
 
 JAVA = ('PdfiumReaderCore','PdfiumRasterLedger','PdfiumViewport','PdfiumEngine','PdfiumSession','PdfiumReaderModule',
-        'PdfiumPageView','PdfiumPageViewManager','PdfiumTouchHostManager')
+        'PdfiumPageView','PdfiumPageViewManager','PdfiumTouchHostManager','ReaderLibraryModule')
 
 
 def source_inputs(root):
@@ -24,7 +24,8 @@ def source_inputs(root):
         root/'scripts/verify_pdfium_reader.py',root/'provenance/pdfium-reader.json',
         root/'scripts/pdfium_elf.py',
         root/'scripts/pdfium_provider.py',root/'native/pdfium_provider.h',
-        root/'overlay/interactivePdf.js',root/'overlay/InteractivePdfReader.js']
+        root/'overlay/interactivePdf.js',root/'overlay/InteractivePdfReader.js',
+        root/'overlay/readerLibrary.js',root/'overlay/ReaderLaunch.js']
 
 
 def digest(path):
@@ -114,7 +115,7 @@ def build(project, root, engine, sdk):
         (java/f'{name}.java').write_text((source/f'{name}.java').read_text(encoding='utf-8').replace(
             'package com.techrebbe.rtl.pdfiumprobe;','package com.supernotertlreader;'),encoding='utf-8')
     package=java/'PdfRendererPackage.kt';text=package.read_text(encoding='utf-8')
-    for before,after in [('        PdfRendererModule(reactContext),','        PdfRendererModule(reactContext),\n        PdfiumReaderModule(reactContext),'),
+    for before,after in [('        PdfRendererModule(reactContext),','        PdfRendererModule(reactContext),\n        PdfiumReaderModule(reactContext),\n        ReaderLibraryModule(reactContext),'),
                          ('        PdfPageViewManager(),','        PdfPageViewManager(),\n        PdfiumPageViewManager(),\n        PdfiumTouchHostManager(),')]:
         if text.count(before)!=1:raise ValueError('Canonical package registration drift')
         text=text.replace(before,after,1)

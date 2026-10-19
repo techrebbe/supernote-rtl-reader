@@ -718,6 +718,7 @@ jobs:
           python3 scripts/test_pdfium_stream_input.py
           python3 scripts/test_pdfium_destinations.py
           python3 scripts/test_pdfium_integration.py
+          python3 scripts/test_reader_library_native.py
           node --test scripts/test_file_read_access.js
           node --test scripts/test_sdk_page_handoff.js
           node --test scripts/test_sdk_canvas_observation.js
@@ -754,7 +755,7 @@ jobs:
       - name: Upload plugin package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: supernote-rtl-reader-v0.4.25-pdfium-exp12-native-reader-v2
+          name: supernote-rtl-reader-v0.4.25-library-exp1-native-reader-v2
           path: out/*.snplg
           if-no-files-found: error
           retention-days: 3

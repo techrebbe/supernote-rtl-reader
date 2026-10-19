@@ -95,6 +95,16 @@ async function main() {
   ]) assert.equal((await file.generateMarkThumbnails(...args)).success, false);
   assert.equal((await file.getPageSize('/disposable.pdf', -1)).success, false);
   assert.equal(calls.length, count, 'invalid requests must not reach native APIs');
-  console.log('Pinned SDK 0.1.65 actual init/read/thumbnail/mark-page/validation checks: PASS');
+  await file.openFile('/disposable.pdf', -1);
+  assert.deepEqual(calls.pop(), ['openFile', '/disposable.pdf', -1]);
+  await file.openFile('/disposable.pdf', 3);
+  assert.deepEqual(calls.pop(), ['openFile', '/disposable.pdf', 3]);
+  await manager.showPluginView();
+  assert.deepEqual(calls.pop(), ['showPluginView']);
+  for (const args of [['',-1],['/disposable.pdf',-2],['/disposable.pdf',1.5],['/disposable.pdf','1']]) {
+    assert.equal((await file.openFile(...args)).success, false);
+  }
+  assert.equal(calls.length,count,'invalid direct-open requests cannot reach native APIs');
+  console.log('Pinned SDK 0.1.65 actual init/read/thumbnail/mark-page/direct-open/show/validation checks: PASS');
 }
 main().catch(error => {console.error(error); process.exitCode = 1;});

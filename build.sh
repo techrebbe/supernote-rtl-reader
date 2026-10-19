@@ -53,7 +53,8 @@ node "$ROOT/scripts/test_plugin_sdk_runtime.js" "$PROJECT/node_modules/sn-plugin
 # Do not download a second Babel graph or silently skip absent dependencies.
 BABEL_MODULE_ROOT="$PROJECT/node_modules" node --test \
   "$ROOT/scripts/test_interactive_pdf.js" "$ROOT/scripts/test_pdfium_lifecycle.js" \
-  "$ROOT/scripts/test_pdfium_bookmark_ui.js"
+  "$ROOT/scripts/test_pdfium_bookmark_ui.js" "$ROOT/scripts/test_reader_library.js" \
+  "$ROOT/scripts/test_reader_library_ui.js"
 
 cp "$ROOT/overlay/App.js" "$PROJECT/App.js"
 cp "$ROOT/overlay/index.js" "$PROJECT/index.js"
@@ -68,6 +69,8 @@ cp "$ROOT/overlay/pageTurnerTransport.js" "$PROJECT/pageTurnerTransport.js"
 cp "$ROOT/overlay/readerKeySession.js" "$PROJECT/readerKeySession.js"
 cp "$ROOT/overlay/interactivePdf.js" "$PROJECT/interactivePdf.js"
 cp "$ROOT/overlay/InteractivePdfReader.js" "$PROJECT/InteractivePdfReader.js"
+cp "$ROOT/overlay/readerLibrary.js" "$PROJECT/readerLibrary.js"
+cp "$ROOT/overlay/ReaderLaunch.js" "$PROJECT/ReaderLaunch.js"
 cp "$ROOT/overlay/app.json" "$PROJECT/app.json"
 cp "$ROOT/PluginConfig.json" "$PROJECT/PluginConfig.json"
 

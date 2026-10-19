@@ -71,6 +71,9 @@ final class PdfiumSession {
         if(!canonicalPath.equals(observed.canonical) || !sha256.equals(observed.sha))
             throw new IllegalStateException("Original PDF was replaced; close and reopen before editing");
     }
+    // QUEUE only. Reuse the bounded, stable, read-only source check; does not
+    // create a PDFium/writer session or change native page/save state.
+    static String fingerprint(String path) throws Exception { return read(path).sha; }
     void close() {
         closed=true;
         if(active==this) {

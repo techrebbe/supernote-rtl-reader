@@ -13,7 +13,14 @@ def patch_app(text):
     text = once(text, "import ReaderKeyView from './ReaderKeyView';",
         "import ReaderKeyView from './ReaderKeyView';\n"
         "import {useInteractivePdf,InteractivePdfPage,InteractivePdfTools,InteractivePdfBookmarks,PdfiumTouchHost} from './InteractivePdfReader';\n"
-        "import {restoreSourcePreferences} from './interactivePdf';", 'imports')
+        "import {restoreSourcePreferences} from './interactivePdf';\n"
+        "import {FavouriteButton} from './ReaderLaunch';\n"
+        "import {assertLibraryContext,assertLibraryOwner} from './readerLibrary';", 'imports')
+    text = once(text, 'export default function App() {',
+        'export default function App({libraryTarget = null}) {', 'favourite launch target')
+    text = once(text, '        const context = await getDocumentContext(() => mountedRef.current);',
+        '        const context = await getDocumentContext(() => mountedRef.current);\n'
+        '        assertLibraryContext(libraryTarget, context);', 'favourite context admission')
     text = once(text, "  const [pageAreaLayout, setPageAreaLayout] = useState({width: 0, height: 0});",
         "  const [readerWindowLayout, setReaderWindowLayout] = useState({width: 0, height: 0});\n"
         "  const [pageAreaLayout, setPageAreaLayout] = useState({width: 0, height: 0});", 'window bounds')
@@ -82,6 +89,8 @@ def patch_app(text):
     text = once(text, "        const restored = decodePreferences(rawPreferences, context);",
         "        const openedPdf = await pdfium.open(context);\n"
         "        if (!mountedRef.current) return;\n"
+        "        try { assertLibraryOwner(libraryTarget, openedPdf); }\n"
+        "        catch (error) { await pdfium.close(false); throw error; }\n"
         "        const restored = decodePreferences(restoreSourcePreferences(rawPreferences, openedPdf.sourceSha256), context);", 'read/open admission')
     text = once(text, "      lastPageIndex: editReturnRef.current ? editReturnRef.current.editPage : pageIndex,",
         "      pdfSourceSha256: pdfium.owner?.sourceSha256,\n"
@@ -202,6 +211,7 @@ def patch_app(text):
     text=once(text,'      <ReaderKeyView',
         '      {chromeVisible && !fatalError && <View>\n'+header+
         '        <InteractivePdfTools reader={pdfium} activePage={pageIndex} disabled={rendering || editBusy || settingsOpen || jumpOpen} />\n'
+        '        <FavouriteButton owner={pdfium.owner} disabled={!preferencesReady || rendering || editBusy || settingsOpen || jumpOpen || pdfium.modal} />\n'
         '      </View>}\n\n      <ReaderKeyView','docked header')
     text=once(text,'      </ReaderKeyView>', '      </ReaderKeyView>\n'
         '      {chromeVisible && !fatalError && <View>\n'+footer+'      </View>}\n'
@@ -217,6 +227,17 @@ def patch_app(text):
 def patch_index(text):
     if 'globalThis.RTL_PDFIUM_OWNER' in text:
         raise ValueError('PDFium index already integrated')
+    text = once(text, "import App from './App';", "import App from './App';\nimport ReaderLaunch from './ReaderLaunch';", 'favourite launch import')
+    text = once(text, '  return <App key={activation} />;',
+        '  return <ReaderLaunch key={activation} App={App} />;', 'favourite launch route')
+    text = once(text, 'PluginManager.closePluginView = async (...args) => {',
+        'PluginManager.closePluginView = async (...args) => {\n'
+        "  if (globalThis.RTL_READER_LIBRARY_OPEN_IN_FLIGHT) throw new Error('A favourite is still opening.');", 'favourite close exclusion')
+    text = once(text, '    if (event?.id === RTL_READER_BUTTON_ID) {',
+        '    if (event?.id === RTL_READER_BUTTON_ID) {\n'
+        "      if (globalThis.RTL_READER_LIBRARY_OPEN_IN_FLIGHT) {\n"
+        "        console.log('RTL_READER_ACTIVATION_BLOCKED reason=favourite_open_in_flight');return;\n"
+        "      }", 'favourite activation exclusion')
     return once(text, '  const inkLifecycle = globalThis.RTL_READER_INK_LIFECYCLE;',
         '  const pdfiumOwner = globalThis.RTL_PDFIUM_OWNER;\n'
         '  if (pdfiumOwner) {\n'

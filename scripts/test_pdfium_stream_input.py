@@ -73,8 +73,10 @@ public class StreamSessionTest {
   ok(value.current());ok(value.inputBytes==65107439);ok(value.canonicalPath.equals(fixture.getCanonicalPath()));
   ok(value.sha256.equals(PdfiumReaderCore.observedHash));ok(value.sha256.length()==64);ok(Os.flags==7);closed();
   value.verifySource();closed();ok(PdfiumReaderCore.opens==1);
+  ok(PdfiumSession.fingerprint(path).equals(value.sha256));closed();ok(PdfiumReaderCore.opens==1);
   try(RandomAccessFile f=new RandomAccessFile(fixture,"rw")){f.seek(f.length()-1);f.write(1);}
   try{value.verifySource();throw new AssertionError("accepted changed bytes");}catch(IllegalStateException expected){assertions++;}
+  ok(!PdfiumSession.fingerprint(path).equals(value.sha256));closed();ok(PdfiumReaderCore.opens==1);
   closed();value.close();ok(PdfiumReaderCore.closes==1);ok(PdfiumReaderCore.releases==1);
   reset();PdfiumReaderCore.afterRead=()->Os.revision++;
   try{PdfiumSession.open(path,663);throw new AssertionError("accepted source drift after snapshot");}catch(IllegalStateException expected){assertions++;}

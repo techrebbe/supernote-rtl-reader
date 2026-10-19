@@ -202,6 +202,23 @@ public class PinchAsyncTest {
         with tempfile.TemporaryDirectory(prefix='pdfium-integrated-app-') as temp:
             app,index=generated(Path(temp))
             self.assertEqual(app.count('<InteractivePdfPage'),3)
+            self.assertIn('export default function App({libraryTarget = null})',app)
+            self.assertLess(app.index('assertLibraryContext(libraryTarget, context)'),app.index('await pdfium.open(context)'))
+            self.assertLess(app.index('assertLibraryOwner(libraryTarget, openedPdf)'),app.index('const restored = decodePreferences('))
+            self.assertIn('catch (error) { await pdfium.close(false); throw error; }',app)
+            self.assertIn('<FavouriteButton owner={pdfium.owner}',app)
+            self.assertIn('<ReaderLaunch key={activation} App={App}',index)
+            self.assertIn('RTL_READER_LIBRARY_OPEN_IN_FLIGHT',index)
+            subprocess.run(['node',str(ROOT/'scripts/test_reader_library_generated.js'),str(Path(temp)/'index.js')],check=True)
+            build=(ROOT/'build.sh').read_text(encoding='utf-8')
+            for name in ('readerLibrary','ReaderLaunch'):
+                self.assertIn(f'cp "$ROOT/overlay/{name}.js" "$PROJECT/{name}.js"',build)
+            native_build=(ROOT/'scripts/build_pdfium_reader.py').read_text(encoding='utf-8')
+            self.assertIn('ReaderLibraryModule(reactContext)',native_build)
+            from build_pdfium_reader import source_inputs,JAVA
+            self.assertIn('ReaderLibraryModule',JAVA)
+            for name in ('readerLibrary','ReaderLaunch'):
+                self.assertIn(ROOT/f'overlay/{name}.js',source_inputs(ROOT))
             self.assertEqual(app.count('<PdfiumTouchHost style={styles.spread}>'),1)
             self.assertEqual(app.count('</PdfiumTouchHost>'),1)
             self.assertNotIn('<NativePdfPageView',app)

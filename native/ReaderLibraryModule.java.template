@@ -1,0 +1,89 @@
+package __PACKAGE__;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+import com.facebook.react.bridge.Promise;
+import com.facebook.react.bridge.ReactApplicationContext;
+import com.facebook.react.bridge.ReactContextBaseJavaModule;
+import com.facebook.react.bridge.ReactMethod;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+// Separate namespace: never changes ReaderPreferencesModule's last-saved path,
+// prepared handoff, Edit return record, document, annotation, or native config.
+public final class ReaderLibraryModule extends ReactContextBaseJavaModule {
+    private final SharedPreferences preferences;
+    private volatile boolean retired;
+    public ReaderLibraryModule(ReactApplicationContext context) {
+        super(context);
+        preferences=context.getSharedPreferences("rtl_reader_favourites_v1",Context.MODE_PRIVATE);
+    }
+    @Override public String getName(){return "ReaderLibraryModule";}
+    private JSONArray read() throws Exception {
+        String raw=preferences.getString("index","{\"version\":1,\"entries\":[]}");
+        if(raw==null || raw.length()>100000)throw new IllegalArgumentException("Invalid favourites storage; not reset");
+        JSONObject index=new JSONObject(raw);
+        if(!(index.get("version") instanceof Number) || index.getDouble("version")!=1)
+            throw new IllegalArgumentException("Unsupported favourites version");
+        JSONArray entries=index.getJSONArray("entries");
+        if(entries.length()>50)throw new IllegalArgumentException("Too many favourites");
+        java.util.HashSet<String> seen=new java.util.HashSet<>();
+        for(int i=0;i<entries.length();i++) {
+            JSONObject value=entries.getJSONObject(i);
+            if(!(value.get("filePath") instanceof String) || !(value.get("sourceSha256") instanceof String) ||
+               !(value.get("pageCount") instanceof Number))throw new IllegalArgumentException("Invalid favourite fields");
+            String path=value.getString("filePath"),sha=value.getString("sourceSha256");
+            double count=value.getDouble("pageCount");
+            validate(path,sha,count);
+            if(!seen.add(path))throw new IllegalArgumentException("Duplicate favourite");
+        }
+        return entries;
+    }
+    private static void validate(String path,String sha,double count) {
+        if(path==null || path.length()>1024 || !path.startsWith("/") || !path.toLowerCase(java.util.Locale.ROOT).endsWith(".pdf") ||
+           path.matches("(?s).*[\\x00-\\x1f\\\\].*") || java.util.Arrays.asList(path.split("/",-1)).contains("..") ||
+           java.util.Arrays.asList(path.split("/",-1)).contains(".") || sha==null || !sha.matches("[a-f0-9]{64}") ||
+           !Double.isFinite(count) || count!=Math.rint(count) || count<1 || count>10000)
+            throw new IllegalArgumentException("Invalid favourite PDF identity");
+    }
+    private String encode(JSONArray entries) throws Exception {return new JSONObject().put("version",1).put("entries",entries).toString();}
+    private interface Action {Object run() throws Exception;}
+    private void queued(Promise promise,Action action) {
+        // Same serial executor as PDF ownership. Fingerprinting cannot race an
+        // in-process snapshot open/close, and never runs on the UI thread.
+        PdfiumSession.QUEUE.execute(()->{
+            try {if(retired)throw new IllegalStateException("Favourites bridge retired");promise.resolve(action.run());}
+            catch(Exception error){promise.reject("RTL_LIBRARY",error.getMessage(),error);}
+        });
+    }
+    @ReactMethod public void load(Promise promise){queued(promise,()->encode(read()));}
+    @ReactMethod public void put(String path,String sha,double count,Promise promise){queued(promise,()->{
+        validate(path,sha,count);JSONArray before=read(),after=new JSONArray();
+        for(int i=0;i<before.length();i++){JSONObject value=before.getJSONObject(i);if(!path.equals(value.getString("filePath")))after.put(value);}
+        if(after.length()>=50)throw new IllegalArgumentException("Favourites limit is 50 PDFs");
+        after.put(new JSONObject().put("filePath",path).put("sourceSha256",sha).put("pageCount",(int)count));
+        String raw=encode(after);
+        if(retired || !preferences.edit().putString("index",raw).commit())throw new IllegalStateException("Favourites were not saved");
+        return raw;
+    });}
+    @ReactMethod public void remove(String path,Promise promise){queued(promise,()->{
+        JSONArray before=read(),after=new JSONArray();
+        for(int i=0;i<before.length();i++){JSONObject value=before.getJSONObject(i);if(!value.getString("filePath").equals(path))after.put(value);}
+        String raw=encode(after);
+        if(retired || !preferences.edit().putString("index",raw).commit())throw new IllegalStateException("Favourite was not removed");
+        return raw;
+    });}
+    @ReactMethod public void verify(String path,String sha,Promise promise){queued(promise,()->{
+        validate(path,sha,1);
+        JSONArray saved=read();boolean found=false;
+        for(int i=0;i<saved.length();i++) {
+            JSONObject value=saved.getJSONObject(i);
+            if(path.equals(value.getString("filePath")) && sha.equals(value.getString("sourceSha256")))found=true;
+        }
+        if(!found)throw new IllegalStateException("Favourite was removed or changed");
+        if(!sha.equals(PdfiumSession.fingerprint(path)))throw new IllegalStateException("Favourite PDF is missing, unreadable or replaced. Remove it and save the current PDF again.");
+        if(retired)throw new IllegalStateException("Favourites bridge retired");
+        return true;
+    });}
+    @Override public void invalidate(){retired=true;super.invalidate();}
+}

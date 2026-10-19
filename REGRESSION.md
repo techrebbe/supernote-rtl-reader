@@ -1,5 +1,20 @@
 # RTL Reader hardware regression
 
+## 2026-10-19 — T020 source review CLEAN, not a hardware pass
+
+Favourites/direct-open implementation plus0.4.25-library-exp1/code72 identity/pins
+independently reviewed CLEAN. Main198JS/native109/real Android35-RN compile/
+Integration9/streamed Session73-JNI87/SDK/Core85407/all271mutations and source gates
+PASS; independent reviewer reran58+74JS/Integration9/native109/Session73/SDK PASS.
+Reviewer Android/JNI reruns were sandbox-limited, not device/software failures.
+No new package built/installed at this source checkpoint; last verified71 retained.
+
+SDK showPluginView true only acknowledges posting UI work. First later approved
+disposable test must observe exact selected-book RTL visibility after one SDK open,
+then normal Close, restoration/integrity/cleanup/release. No automatic retries,
+native-library interception, original PDFs/.mark writes, root or firmware changes.
+See T020 task/review notes. Source bookkeeping is not hardware/annotation proof.
+
 ## 2026-10-18 — H2R1 pinch FAIL/budget rejection; recovery/cleanup PASS
 
 Reservation6252475180, SAME executable72d9a3e66a9bcb1e59df2690507dc5b2658090f5

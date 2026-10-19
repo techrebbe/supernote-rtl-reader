@@ -1079,7 +1079,9 @@ def check(repo_root: Path) -> None:
             # H13 exp11 marker ONLY; exact reverse restores f0212147...c901c.
             # Ergonomics exp12 marker ONLY; exact reverse restores the prior
             # d362a3fa...919a4 digest. Gesture implementation is separate.
-            "0d0a9290941d041e57aed8ec7e867b915556567fe75047fbf108a955af8e6b9a",
+            # T020 changes canonical marker ONLY to library-exp1. Exact reverse
+            # replacement restores 0d0a9290...e6b9a; identity follow-up required.
+            "57307660e691f8ec22532f3ba0ab0f49d87bfee73a9b71ab0cf56b51376e7e19",
             "Edit/Return activation and close authority",
         ),
         (
@@ -1118,7 +1120,10 @@ def check(repo_root: Path) -> None:
             # H13 exp11 artifact label ONLY; reverse restores 2d6bbabb...43bc9.
             # Ergonomics exp12 artifact label ONLY; exact reverse restores
             # 8f773bba...93255. Signing/actions/SDK/permissions unchanged.
-            "ccaf9cd87948869d44646fdd5c9f4ff2c4ea810eae80722213d531065c174727",
+            # T020 reviewed source adds ONE native-library test command; this
+            # candidate also changes the artifact label ONLY. No SDK/action/
+            # signing/permission change. Identity follow-up required.
+            "02d59e20bceffb526b03fa10350d05a3fe012804d18e6675db1a22caa15398c1",
             "Native Spread companion-build workflow",
         ),
         (
@@ -1131,7 +1136,10 @@ def check(repo_root: Path) -> None:
             # regression commands using the existing pinned Babel graph. Exact
             # removal restores 62ccf6dd...41e31dcf. Independent review PENDING;
             # this expectation is not package/hardware/release authorization.
-            "e2744c4ea86e1b73cfd225b4590939d72c786ec0bf42dfc7def90341c2a210e3",
+            # T020 independent source review covers exactly TWO JS copies and
+            # TWO tests added to the existing pinned Babel run. No dependency,
+            # signing, permission or other build-path edit. Pin follow-up next.
+            "a65b62b00dec84606f6a825930bdcc51b6b9059c528f9cf9c2670a8a573323ae",
             "native plugin build entrypoint",
         ),
         (

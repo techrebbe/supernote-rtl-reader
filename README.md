@@ -2,6 +2,19 @@
 
 A Supernote plugin focused on right-to-left PDF reading and landscape two-page spreads, designed especially for Hebrew books.
 
+## In preparation: favourite PDFs
+
+The next source change adds `Save to favourites` inside RTL Reader. On later RTL
+Reader launches, a book chooser can open one of those saved PDFs directly, or
+continue with the currently open PDF. Supernote's own file list still opens its
+native reader; Edit and Close remain native too. This is an explicit fallback,
+not automatic interception of the system file list. Missing/replaced favourites
+are rejected rather than inheriting another document's saved position.
+
+This feature is local source preparation, not installed/released functionality.
+See [T020](coord/tasks/T-020-favourites-direct-open.md) for review/build and the
+smallest disposable-device test required before use.
+
 ## Current priority: interactive original-PDF reading
 
 The current direction is an unrooted, dedicated RTL reading view that opens the

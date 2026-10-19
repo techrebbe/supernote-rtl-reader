@@ -1,4 +1,40 @@
-# STATE — RTL Reader (updated 2026-10-18 by codex)
+# STATE — RTL Reader (updated 2026-10-19 by codex)
+
+## T020 source and exact72 identity independently CLEAN; local build next
+
+User approved independent source review. Reviewer found no confirmed actionable
+source defect/high blocker, independently reran58+74JS/Integration9/native109/
+Session73/SDK forwarding, and separately confirmed exact0.4.25-library-exp1/code72
+marker/artifact/config and all three scoped frozen hashes by reverse reconstruction.
+27-input aggregate9840778312d78d31bcf212fde9f33804cc00561b7a7de0b807b5abd8841e63e9.
+Native/v2/cross-layer/Edit/wiring gates pass. Main sources unchanged since review.
+SDK showPluginView is only a queued acknowledgement; first later disposable gate
+MUST prove launch retention and visible exact-book RTL reopening, not infer it.
+
+Normal clean exact-source build/package/signature next. No candidate installation,
+Nomad access, source publication, timer resume or merge. Last verified installed71
+and rollback70 retained. Pinch budget failure OPEN/independent; ink PARKED. Earlier
+pending-review/frozen-gate text below is historical. Review note preserved locally.
+
+## 2026-10-19: favourites/direct-open selected; local source preparation
+
+User chose the favourites fallback, not a guessed native auto-open hook. Local
+WIP on base2d815e7 adds a separate private library store, deliberate launch chooser,
+one supported openFile(-1), bounded path/count/source confirmation, cross-activation
+open exclusion and actual staged-owner admission. No live-App book switch or
+new writer/handoff authority. Empty list preserves current-document launch; native
+file list, native Edit and Close stay native. Details/gates in
+tasks/T-020-favourites-direct-open.md. Installed71/rollback untouched, no device,
+publication, new package, timer or merge. Independent review approval requested;
+frozen workflow/build pin review and new candidate identity still required before
+build. Pinch budget rejection remains a separate OPEN issue; ink PARKED.
+
+Focused offline evidence:198 JS (including26 new library tests),109 actual native
+library assertions, real Android35/RN0.79.2 compile, Integration9/generated index
+guards, streamed-source2/three compiled mutants, pinned SDK direct-open/show
+forwarding,85407Core/all271mutations/package fail-closed/wiring6 and native/v2/Edit
+invariants PASS. Cross-layer gate intentionally blocked at changed frozen workflow
+digest pending review; no blind repin. No process remains active at this checkpoint.
 
 ## Current: pinch budget rejection safely recovered; RELEASE6252663180
 

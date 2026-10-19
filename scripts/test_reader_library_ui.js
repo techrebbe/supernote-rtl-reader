@@ -77,6 +77,28 @@ test('actual launch row opens exactly one saved PDF then mounts target-bound App
   const tree=h.render();assert.equal(tree.type,'ActualApp');assert.equal(tree.props.libraryTarget.sourceSha256,book.sourceSha256);
   assert.equal(tree.props.libraryTarget.filePath,book.filePath);h.unmount();
 });
+
+test('early host resume reveals only the waiting chooser until post-open source verification completes',async()=>{
+  const hold=deferred();let verified=0;
+  const h=harness(index([book]),{verify:async()=>++verified===1?true:hold.promise});
+  h.render();await tick();const pending=h.button(h.render(),'disposable.pdf').props.onPress();
+  await tick();
+  assert.deepEqual(h.calls.filter(x=>['open','show'].includes(x[0])),[['open',book.filePath,-1],['show']]);
+  const waiting=h.render();assert.notEqual(waiting.type,'ActualApp');
+  assert.ok(h.all(waiting,'Text').some(t=>t.children.includes('Please wait…')));
+  assert.equal(h.button(waiting,'disposable.pdf').props.disabled,true);
+  hold.resolve(true);await pending;
+  assert.equal(h.render().type,'ActualApp');h.unmount();
+});
+
+test('a changed source after native open/resume leaves a visible chooser error, never an unverified App',async()=>{
+  let verified=0;const h=harness(index([book]),{verify:async()=>++verified===1});
+  h.render();await tick();await h.button(h.render(),'disposable.pdf').props.onPress();
+  const tree=h.render();assert.notEqual(tree.type,'ActualApp');
+  assert.ok(h.all(tree,'Text').some(t=>t.children.some(x=>typeof x==='string'&&x.includes('changed while opening'))));
+  assert.deepEqual(h.calls.filter(x=>['open','show','close'].includes(x[0])),[['open',book.filePath,-1],['show']]);
+  assert.equal(h.button(tree,'disposable.pdf').props.disabled,false);h.unmount();
+});
 test('chooser Close uses normal close with explicit no-page-handoff and duplicate close fenced',async()=>{
   const h=harness(index([book]));h.render();await tick();const close=h.button(h.render(),'Close to native reader');
   await close.props.onPress();await close.props.onPress();

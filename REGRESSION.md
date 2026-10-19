@@ -1,5 +1,20 @@
 # RTL Reader hardware regression
 
+## 2026-10-19 — T020 automatic-return73 source correction, hardware NOT PERFORMED
+
+New source ordering regression reproduces72 waiting on an RN timer while the
+host is paused.73 sends the SAME single supported show immediately after one
+acknowledged open, before context checks. No delay/retry/new native or writer
+path. Waiting chooser may show early; exact context/source/actual-owner checks
+still precede any PDF render. Phase records do not claim actual visibility.
+
+Independent correction and ten-file identity/pin reviews CLEAN. Actual controller/
+JSX30 and combined JS244 PASS; native library109, integration9, core85407/all271
+mutations, native/v2/cross-layer/Edit/packaging/wiring6 and SDK forwarding PASS.
+Exact73/library-exp2 package build/signature is next; no install/device access,
+publication, merge or new hardware result. Prior72 FAIL/release evidence below
+is retained, not overwritten by source tests. Original PDFs/annotations untouched.
+
 ## 2026-10-19 — T020 favourite persists, but automatic RTL return FAIL
 
 Exact106ec80/0.4.25-library-exp1/code72/SNPLG3327f873...19d29d on unrooted3.30.45,

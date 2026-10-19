@@ -4,6 +4,13 @@ A Supernote plugin focused on right-to-left PDF reading and landscape two-page s
 
 ## Experimental favourite PDFs: automatic RTL return still blocked
 
+The73/library-exp2 correction now passes focused independent source/identity
+review and host regressions. It moves the existing single show request ahead
+of timer-based context checks so a hidden/paused plug-in can resume. The waiting
+chooser is not permission to render an unverified PDF. Exact package/signature
+and a newly approved bounded Nomad test are still required; no hardware fix is
+claimed yet. Installed72 and its measured failure below remain the baseline.
+
 The experimental build adds `Save to favourites` inside RTL Reader. On later RTL
 Reader launches, a book chooser is intended to open a saved PDF directly, or
 continue with the currently open PDF. Supernote's own file list still opens its

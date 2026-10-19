@@ -71,6 +71,7 @@ export default function ReaderLaunch({App}) {
         const opened = await openFavourite(book, {store,manager:PluginManager,files:PluginFileAPI,
           comm:PluginCommAPI,doc:PluginDocAPI,drain:drainPreviousReader,
           ensureReadAccess:ensureFileReadAccess,isCurrent:()=>live.current,
+          trace:({id,phase})=>console.log(`RTL_READER_FAVOURITE request=${id} phase=${phase}`),
           wait:ms=>new Promise(resolve=>setTimeout(resolve,ms))});
         if (live.current) {setTarget(opened);setRoute('reader');}
       })}

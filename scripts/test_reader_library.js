@@ -38,11 +38,46 @@ test('actual staged owner and current SDK context must match saved source before
   for(const value of [null,{...book,sourceSha256:'b'.repeat(64)},{...book,pageCount:5},{...book,filePath:'/other.pdf'}])
     assert.throws(()=>assertLibraryOwner(book,value));
 });
-test('one supported native open, native last page, exact context and source checks, then show',async()=>{
+test('one native open, one host resume, then exact context and source checks before admission',async()=>{
   const h=harness();assert.deepEqual(await h.run(),book);
-  assert.deepEqual(h.calls.map(x=>x[0]),['drain','read','verify','open','path','count','path','verify','show']);
+  assert.deepEqual(h.calls.map(x=>x[0]),['drain','read','verify','open','show','path','count','path','verify']);
   assert.deepEqual(h.calls.find(x=>x[0]==='open'),['open',book.filePath,-1]);
   assert.equal(globalThis.RTL_READER_LIBRARY_OPEN_IN_FLIGHT,null);
+});
+
+test('native open pauses RN timers: resume must precede context confirmation or any timer wait',async()=>{
+  const heldTimer=deferred(),h=harness();let paused=false,settled=false,result,error;
+  h.deps.files.openFile=async(...args)=>{h.calls.push(['open',...args]);paused=true;return {success:true,result:true};};
+  h.deps.manager.showPluginView=async()=>{h.calls.push(['show']);paused=false;return true;};
+  h.deps.comm.getCurrentFilePath=async()=>{h.calls.push(['path']);return {success:true,result:paused?'/old.pdf':book.filePath};};
+  h.deps.wait=async()=>{h.calls.push([paused?'paused-timer':'wait']);if(paused)await heldTimer.promise;};
+  const pending=h.run().then(value=>{settled=true;result=value;},failure=>{settled=true;error=failure;});
+  try {
+    // Native callbacks/microtasks still run, but a hidden RN host cannot drive
+    // its frame-based JavaTimerManager. No wall-clock or synthetic extra show.
+    for(let turn=0;turn<30;turn++)await Promise.resolve();
+    assert.equal(settled,true,'favourite is stuck waiting on a hidden-host timer');
+    assert.equal(error,undefined);assert.deepEqual(result,book);
+    assert.equal(h.calls.filter(call=>call[0]==='open').length,1);
+    assert.equal(h.calls.filter(call=>call[0]==='show').length,1);
+    assert.ok(!h.calls.some(call=>call[0]==='paused-timer'));
+    assert.ok(h.calls.findIndex(call=>call[0]==='show')<h.calls.findIndex(call=>call[0]==='path'));
+  } finally {h.cancel();heldTimer.resolve();await pending;}
+});
+
+test('phase records identify this request and never stand in for visual or staged-owner verification',async()=>{
+  const phases=[],h=harness({trace:record=>phases.push(record)});
+  assert.deepEqual(await h.run(),book);
+  assert.deepEqual(phases.map(x=>x.phase),['preparing','open-requested','open-acknowledged',
+    'show-requested','show-acknowledged','context-confirmed','target-verified']);
+  assert.equal(new Set(phases.map(x=>x.id)).size,1);
+  assert.ok(Number.isSafeInteger(phases[0].id));
+  assert.ok(!phases.some(x=>x.phase.includes('visible')||x.phase.includes('render')));
+  const failed=[],bad=harness({trace:record=>failed.push(record),manager:{showPluginView:async()=>false}});
+  await assert.rejects(bad.run(),/reopening/);
+  assert.equal(failed.at(-1).phase,'failed');assert.notEqual(failed[0].id,phases[0].id);
+  const loggingFailure=harness({trace:()=>{throw Error('logging unavailable');}});
+  assert.deepEqual(await loggingFailure.run(),book);
 });
 test('ordinary native transition latency gets bounded read-only confirmation, never reopens',async()=>{
   const h=harness();let reads=0;
@@ -55,11 +90,11 @@ test('confirmation bound exhausts without guessing a destination or retrying mut
   await assert.rejects(h.run(),/timed out/);
   assert.equal(h.calls.filter(x=>x[0]==='open').length,1);
   assert.equal(h.calls.filter(x=>x[0]==='wait').length,7);
-  assert.equal(h.calls.filter(x=>x[0]==='show').length,0);
+  assert.equal(h.calls.filter(x=>x[0]==='show').length,1);
 });
 test('a path switch during count read cannot satisfy confirmation',async()=>{
   let reads=0;const h=harness({comm:{getCurrentFilePath:async()=>({success:true,result:++reads%2?book.filePath:'/other.pdf'})}});
-  await assert.rejects(h.run(),/timed out/);assert.ok(!h.calls.some(x=>x[0]==='show'));
+  await assert.rejects(h.run(),/timed out/);assert.equal(h.calls.filter(x=>x[0]==='show').length,1);
 });
 for(const stage of ['drain','read','verify','open','path','count','show']) {
   test(`failure at ${stage} never mounts a reader or retries native open`,async()=>{
@@ -87,9 +122,11 @@ test('false/ambiguous native success and source verify replies fail closed',asyn
   }
   const h=harness({manager:{showPluginView:async()=>false}});await assert.rejects(h.run(),/reopening/);
 });
-test('source replacement after SDK open prevents show/reader admission',async()=>{
+test('source replacement after native open/resume still prevents reader admission',async()=>{
   const h=harness();let checks=0;h.deps.store.verify=async()=>++checks===1;
-  await assert.rejects(h.run(),/changed while opening/);assert.ok(!h.calls.some(x=>x[0]==='show'));
+  await assert.rejects(h.run(),/changed while opening/);
+  assert.equal(h.calls.filter(x=>x[0]==='open').length,1);
+  assert.equal(h.calls.filter(x=>x[0]==='show').length,1);
 });
 test('synchronous global lease rejects overlapping opens, including a replacement launch',async()=>{
   const hold=deferred(),h=harness({drain:()=>hold.promise}),second=harness();

@@ -1,5 +1,36 @@
 # T020 independent source review — 2026-10-19
 
+## Automatic-return correction review — CLEAN, source only
+
+Reviewer t020_return_fix_review independently inspected the four-file correction
+against6e0e936, then separately confirmed the complete ten-file non-document
+identity/pin diff. No reviewer edits, device/build/network/publication or further
+delegation.30 actual controller/JSX tests independently PASS; whitespace PASS.
+
+No actionable finding or critical/high blocker. Exactly one acknowledged open,
+immediately one supported show before timer-based confirmation; only disabled
+waiting chooser exposed, not an unverified PDF. Path/count/path, post-open SHA,
+actual staged-owner admission, queued cleanup, activation/Close exclusions,
+source-bound preferences and Edit/Return unchanged. RN JavaTimerManager confirms
+pause disables ordinary timer frames/resume restarts them. Posted SDK show still
+does NOT prove visibility; next disposable test must establish fresh current
+OPENED/READY and actual exact-book RTL view after one B-to-A selection.
+
+Reviewed raw SHA256 (source/test content unchanged in identity follow-up):
+
+- ReaderLaunch.js:1aed368cb27d13e72224619f77d68d43b8d98d539a7687d6c17779655f732438
+- readerLibrary.js:a36bdaeb3b4a2c04f9d151577525d14289ad760cd93f8dac9001939349d7df94
+- test_reader_library.js:485f4f1b6ca774c4b2639eeb188395e284ca4265cef2832af770b2c9adfae554
+- test_reader_library_ui.js:f2a89c4c8bf5d2336edb280cfa508926abd01cec6b7bd661a67a21dfaf1ae8b2
+
+Identity73/library-exp2, same pluginID/FILE:READ-only. Index LF393e930d...07f976c,
+workflow LF58d47d99...29d2121; single reverse token substitution restores exact
+base57307660...376e7e19 and02d59e20...15398c1. Both identity scripts reverse to
+base; cross-layer gate reverses with only two digests/four comment lines. Pin
+scope legitimate. No build/native/SDK/signing/permission/writer/Edit/Close change.
+Ready for exact candidate build/bounded hardware AFTER package/approval gates,
+not installed identity, hardware success or permission to reuse consumed R5.
+
 ## Hardware gate status (not an additional review)
 
 2026-10-19 exact106ec80/code72 now tested under6272641827: startup, save notice

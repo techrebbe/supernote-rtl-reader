@@ -2,6 +2,41 @@
 
 ## Current approved hardware checkpoint
 
+### Return correction73: offline ready for exact build, no new hardware approval
+
+User requested fix/next-test readiness. Minimal source correction resumes the
+hidden RN host with the SAME single supported SDK show immediately after the
+SAME acknowledged open, before timer-based context confirmation. Waiting chooser
+only; exact path/count/path+post-open SHA and actual PDFium owner remain gates.
+Numeric request/fixed-phase logs distinguish this attempt from stale READY.
+No native/root/permission/signing/writer/save/Close/Bluetooth change or retry.
+
+Retained public host APK f60ce483...d2aad: HostCommImpl.openFile posts its
+hide lambda before callback; lambda$openFile$1 at262738 invokes hidePluginView
+and clears plugin client UID. hide at259b68 invokes RN onHostPause; SDK show
+posts normal host resume (PluginManager.show at256218). RN0.79.2 timer pause/
+resume source supports the regression. This is a concrete potential deadlock,
+not retroactive proof of which exact callback72 reached on the device.
+
+Old implementation failed the controlled paused-timer case. Corrected actual
+controller/JSX30, combined current JS244, native library109, integration9,
+core85407/all271 mutations and native/v2/cross-layer/Edit/packaging/wiring6/SDK
+gates pass. Independent source and identity/frozen-pin reviews CLEAN. Version
+0.4.25-library-exp2/code73/runtime marker consistent; index/workflow change
+ONLY identity tokens and exact two digest expectations. Exact package next;
+not built, installed or published. Device remains released; timer PAUSED.
+
+Earliest next hardware: reviewed exact compatible-signed73, explicit install/test
+approval, fresh issue23 reservation and exact disposable/source/power preflight.
+Reuse cleanB and savedA, no new pen/data. Independently capture B PAGE1/footer
+BEFORE launch, select A ONCE. Require current request phase sequence, then NEW
+post-selection exactA OPENED/READY plus actual visible RTL owner/PAGE1/4; old
+cumulative logs and posted show acknowledgement cannot pass. Hard stop on hidden
+reader, context/source mismatch, error or missing current evidence; no retry or
+native restart. Normal Close/restoration/integrity/owned cleanup/release, using
+verified semantic navigation rather than needless manual actions. No speculative
+emulator prerequisite. Preserve original PDFs/.mark, packages and all evidence.
+
 NOW actual-visibility gate FAIL, same106ec80/code72; R5 RELEASE6274679737. A save and
 persisted favourites chooser after Close/relaunch PASS. User followed B setup
 (native B context not independently captured) and selected A once. Current

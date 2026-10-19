@@ -1,6 +1,7 @@
 // Favourites are launch choices, not an interception of Supernote's file list.
 // No PDF/annotation writes and no saved-page or Edit-return authority here.
 const MAX_BOOKS = 50;
+let nextRequest = 0; // Diagnostic labels only; the unique ticket remains authority.
 function entry(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
       typeof value.filePath !== 'string' || value.filePath.length > 1024 ||
@@ -37,22 +38,34 @@ function assertLibraryOwner(target, owner) {
   }
 }
 async function openFavourite(value, {store, manager, files, comm, doc, drain, isCurrent, wait,
-    ensureReadAccess}) {
+    ensureReadAccess, trace = () => {}}) {
   const saved = entry(value);
   if (globalThis.RTL_READER_LIBRARY_OPEN_IN_FLIGHT) throw Error('Another favourite is still opening.');
-  const ticket={};globalThis.RTL_READER_LIBRARY_OPEN_IN_FLIGHT=ticket;
+  const ticket={id:++nextRequest};globalThis.RTL_READER_LIBRARY_OPEN_IN_FLIGHT=ticket;
+  const mark = phase => {try {trace({id:ticket.id,phase});} catch (_) {/* diagnostics are not authority */}};
   const current = () => {if (isCurrent() !== true || globalThis.RTL_READER_LIBRARY_OPEN_IN_FLIGHT!==ticket)
     throw Error('Favourite opening cancelled.');};
   try {
   current();
+  mark('preparing');
   await drain(); current();
   await ensureReadAccess(manager, isCurrent); current();
   if (await store.verify(saved.filePath, saved.sourceSha256) !== true) throw Error('Favourite PDF verification failed.');
   current();
   // Exactly one supported open. -1 delegates the native last-viewed page;
   // the normal source-bound preference/Edit-return loader still chooses page.
+  mark('open-requested');current();
   const opened = await files.openFile(saved.filePath, -1); current();
   if (opened?.success !== true || opened.result !== true) throw Error('Supernote did not confirm opening the favourite. No retry was sent.');
+  mark('open-acknowledged');current();
+  // SDK0.1.65's host posts hidePluginView/onHostPause before its open callback.
+  // RN timers can then be paused. Queue the ONE supported show immediately:
+  // context confirmation must not wait on those timers before host resume.
+  // This reveals only the waiting chooser, never an unverified PDF. A posted
+  // show acknowledgement is not visibility or document/source authority.
+  mark('show-requested');current();
+  if (await manager.showPluginView() !== true) throw Error('Supernote did not confirm reopening RTL Reader.');
+  current();mark('show-acknowledged');
   let confirmed = false;
   for (let attempt = 0; attempt < 8; attempt++) {
     const path = await comm.getCurrentFilePath(); current();
@@ -65,11 +78,12 @@ async function openFavourite(value, {store, manager, files, comm, doc, drain, is
     if (attempt < 7) {await wait(100); current();}
   }
   if (!confirmed) throw Error('Favourite document confirmation timed out. No retry was sent.');
+  mark('context-confirmed');current();
   if (await store.verify(saved.filePath, saved.sourceSha256) !== true) throw Error('Favourite PDF changed while opening.');
-  current();
-  if (await manager.showPluginView() !== true) throw Error('Supernote did not confirm reopening RTL Reader.');
-  current();
+  current();mark('target-verified');current();
   return saved; // App must still authenticate the actual staged PDFium owner.
+  } catch (failure) {
+    mark('failed');throw failure;
   } finally {
     if(globalThis.RTL_READER_LIBRARY_OPEN_IN_FLIGHT===ticket)globalThis.RTL_READER_LIBRARY_OPEN_IN_FLIGHT=null;
   }

@@ -1,5 +1,36 @@
 # STATE — RTL Reader (updated 2026-10-19 by codex)
 
+## Current T020 return correction:73 source reviewed/tested; exact build next
+
+User requested fixing automatic return and notification when next Nomad test is
+ready. Installed72 remains untouched; prior R5 released6274679737, timer PAUSED.
+No hardware access, installation, publication, merge or PR finalization this pass.
+Owned branch agent/page-turner-bridge, base6e0e936. Candidate73/library-exp2.
+
+Concrete source ordering defect: retained hash-verified3.30.45 PluginHost's
+supported openFile posts hidePluginView/onHostPause before returning its callback.
+RN0.79.2 JavaTimerManager pauses ordinary frame timers onHostPause. Previously
+confirmation could await100ms while hidden before reaching show. This explains
+a source-level deadlock mode, NOT a claim the exact live72 callback phase was
+observed. New regression fails on old source and passes after correction.
+
+Minimal correction: SAME one supported open, then SAME one supported show
+immediately after exact successful open acknowledgement, before timer-based
+context confirmation. Show reveals disabled waiting chooser ONLY; path/count/
+path, post-open SHA and actual staged PDFium-owner gates remain mandatory before
+reader admission. Phase/request logs are numeric/fixed labels, not visibility
+proof. No new native module, permission, listener, delay, retry, writer/save path
+or private/root API execution. Portrait/spread/Bluetooth/Edit/Close unchanged.
+
+Independent four-file correction review CLEAN,30 actual controller/JSX pass;
+separate exact ten-file identity/pin follow-up CLEAN. Reverse token substitutions
+restore exact prior index/workflow content and frozen LF digests. Current244 JS,
+native library109 assertions, integration9, core85407/all271 mutations, native/
+v2/cross-layer/Edit/packaging/wiring6 and pinned SDK forwarding PASS. An initial
+generated-test invocation lacked explicit Python/arguments; corrected invocation
+passes, no production gate weakened. Exact clean-source compatible package is
+NEXT,73 not built/installed or published. Keep72/71 packages and all evidence.
+
 ## Current T020: favourites visible-open FAIL; R5 RELEASE6274679737, cleanup PASS
 
 Same exact106ec80/code72/package3327f873...19d29d, reservation6272641827. Save

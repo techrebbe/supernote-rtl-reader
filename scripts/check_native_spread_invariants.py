@@ -1081,7 +1081,9 @@ def check(repo_root: Path) -> None:
             # d362a3fa...919a4 digest. Gesture implementation is separate.
             # T020 changes canonical marker ONLY to library-exp1. Exact reverse
             # replacement restores 0d0a9290...e6b9a; identity follow-up required.
-            "57307660e691f8ec22532f3ba0ab0f49d87bfee73a9b71ab0cf56b51376e7e19",
+            # T020 return correction: library-exp1 -> library-exp2 marker ONLY;
+            # exact reverse restores 57307660...376e7e19. Scoped review required.
+            "393e930d710ce0b8ab7033fe87732ab6c71e2305a0c7807cecdc773be07f976c",
             "Edit/Return activation and close authority",
         ),
         (
@@ -1123,7 +1125,9 @@ def check(repo_root: Path) -> None:
             # T020 reviewed source adds ONE native-library test command; this
             # candidate also changes the artifact label ONLY. No SDK/action/
             # signing/permission change. Identity follow-up required.
-            "02d59e20bceffb526b03fa10350d05a3fe012804d18e6675db1a22caa15398c1",
+            # T020 return correction: artifact label ONLY. Exact reverse
+            # restores 02d59e20...15398c1; no SDK/signing/action/test-command edit.
+            "58d47d99a9697223fd35b752db6c6bd25dbe2d9176c01388131e8c8dc29d2121",
             "Native Spread companion-build workflow",
         ),
         (

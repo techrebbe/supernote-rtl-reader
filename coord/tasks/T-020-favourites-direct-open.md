@@ -2,6 +2,23 @@
 
 ## Current approved hardware checkpoint
 
+Checkpoint6274104551: visible exact72 runtime PASS under SAME held6272641827; one matching
+runtime marker, exact synthetic four-pageA nativePage1/readerPage1 OPENED and
+single-page READY. Retained XML/PNG shows SOURCE PAGE1/1-of-4, white portrait Fit,
+enabled Save to favourites, no error. Human saved ONCE; retained follow-up XML/PNG
+confirms Remove favourite and explicit Saved notice on same PAGE1/4; bounded
+post-save runtime error gate/READY PASS. Store/UI acknowledgement is NOT reopen
+persistence. Human asked to normal Close, open synthetic two-pageB PAGE1 and
+launch RTL, leaving chooser visible without selection. B-to-A direct-open remains
+UNTESTED. No extra rebuild/review prerequisite.
+
+Wi-Fi currently has no wlan0 IPv4; exact verified USB used for read-only capture.
+No settings/network change. Local owner guard corrected to accept exact
+package-only PluginHost Window title as well as package/component, with13
+actual-parser cases and no production change. Startup log/capture retained;
+owned scratch/stage/integrity/cleanup/release still pending. No active process
+while waiting for chooser setup; keep USB connected until Wi-Fi is re-established.
+
 NOW72 installed/ON manually and manager/source-stage verified, checkpoint
 6273859271 under SAME active6272641827. Source106ec80/package3327f873...19d29d
 unchanged; local candidate/71rollback exact. Installed native payload not extracted;

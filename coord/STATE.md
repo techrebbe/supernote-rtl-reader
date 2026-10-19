@@ -1,6 +1,29 @@
 # STATE — RTL Reader (updated 2026-10-19 by codex)
 
-## Current T020:72 installed/ON VERIFIED; R5 held, first runtime gate pending
+## Current T020:72 startup/save confirmation PASS; R5 held, reopen test next
+
+Checkpoint6274104551, SAME exclusive6272641827: exact72 runtime marker once after the
+retained activation boundary. OPENED authenticates synthetic four-pageA PAGE1,
+nativePage=readerPage=1; native single-page READY token1/pages1 observed. Read-only
+XML/PNG verifies SOURCE PAGE1/1-of-4, white portrait Fit and enabled Save to
+favourites. Human then tapped Save ONCE. Follow-up XML/PNG shows Remove favourite
+and "Saved. Choose this PDF next time you open RTL Reader." on the same PAGE1/4;
+bounded post-save log has no known error and page1 READY. This confirms native
+store/UI save acknowledgement, NOT reopen persistence/direct-open success yet.
+Human asked to normal Close, open synthetic two-pageB PAGE1 and launch RTL,
+leaving chooser untouched. Direct-open still UNTESTED; do not infer success from
+startup, save acknowledgement or a later SDK show acknowledgement.
+
+Prior WLAN endpoint became unreachable; exact USB target/firmware remains
+connected. Wi-Fi enabled but wlan0 has no IPv4 address; USB used for capture,
+no network/settings changes or address scanning. Local capture-only prerequisite
+corrected exact owner parsing for observed package-only PluginHost Window title
+(13 actual-parser cases pass, including prefix/duplicate/null rejection).
+No production/package change or rebuild. Runtime-first-a and reader-a-first
+local evidence retained; owned captures/stage still pending cleanup/release.
+No active device/build/test/review/observer process while awaiting chooser setup.
+
+## Previous checkpoint:72 installed/ON VERIFIED; first runtime pending
 
 User manually installed the exact staged package and reported installed. Same
 active exclusive reservation6272641827; checkpoint6273859271. Read-only current

@@ -1,5 +1,27 @@
 # RTL Reader hardware regression
 
+## 2026-10-19 — T020 exact72 startup/save confirmation PASS; direct-open pending
+
+Checkpoint6274104551, same held R5 reservation6272641827;0.4.25-library-exp1/code72
+from exact106ec80/package3327f873...19d29d. One exact runtime marker after retained
+boundary, OPENED syntheticA nativePage1/readerPage1, READY token1/pages1; XML/PNG
+visually confirms SOURCE PAGE1,1/4, white portrait Fit and enabled Save to
+favourites. No error/fatal in bounded startup log. Human saved ONCE; follow-up
+XML/PNG confirms Remove favourite and explicit Saved notice on same PAGE1/4.
+Bounded post-save log has no known failure and page1 READY. Store/UI save
+acknowledgement PASS, reopen persistence/direct-open still UNTESTED. Human asked
+to normal Close, open synthetic two-pageB PAGE1 and launch RTL, leaving chooser
+untouched. No automated input/pen or additional install implied.
+
+Wi-Fi endpoint unreachable; exact verified USB serial/firmware used instead.
+Wi-Fi enabled but no current wlan0 IPv4; no network setting change. Capture helper
+initially rejected legitimate package-only PluginHost Window title BEFORE remote
+capture creation. Narrow exact-token parser correction passes13 local cases,
+including wrong/prefix-colliding owner, duplicate/null and malformed rejection;
+same pending capture then passed. No production change/new APK. Actual installed
+native payload/certificate still not independently extracted. Local raw log,
+XML/PNG and receipts retained; full integrity/owned cleanup/release remain pending.
+
 ## 2026-10-19 — exact72 manual installation/ON verified; runtime test pending
 
 R5 reservation6272641827 remains exclusive/held, checkpoint6273859271. User manual

@@ -1,5 +1,23 @@
 # RTL Reader hardware regression
 
+## 2026-10-19 — T020H1R1 NOTPERFORMED; pre-install owner change, cleanup PASS
+
+Fresh6270552551 after user library-ready. Exact target/ordinary shell/3.30.45/
+API30/73% charging/library owner/protected-data/public-package/rotation preflight
+PASS. Normal public Settings/Apps/Plugins verified installed71 ON. Exact72
+SNPLG3327f873...19d29d and a new clean synthetic two-pageB were staged/hash verified.
+Before the next Back, owner guard refused BEFORE input: screen returned to
+library. Cause/user intervention UNKNOWN. No package selection/install, PDF
+activation, page turn, reader runtime or further experiment;72 UNINSTALLED.
+
+Postflight protected originals/annotations/existing copies/newB/public packages
+exact, marks absent, rotation unchanged.10 regular/nonlink/local-backed captures
+and ONE unique installer stage removed individually/absence verified. SyntheticB
+retained unchanged with host/device receipt; local raw/candidate/71rollback kept.
+RELEASE6270642388, no active device/build/test/review process. User asked whether
+they switched the screen and to leave it untouched. No restored Settings-scene
+claim. Next NEW reservation after explanation/readiness; no rebuild prerequisite.
+
 ## 2026-10-19 — T020H1 NOTPERFORMED; published, device released
 
 User approved the reviewed25-file publication and exact72 installation/one

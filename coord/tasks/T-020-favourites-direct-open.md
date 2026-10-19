@@ -2,6 +2,14 @@
 
 ## Current approved hardware checkpoint
 
+LATEST: H1R1 NEW6270552551 consumed/released6270642388. Metadata integrity/power/
+library checks PASS; normal manager verified71 ON. Exact72 installer and clean
+two-pageB staged, then owner changed to library before Back; guard stopped before
+input/package selection/install. Cause UNKNOWN, user explanation requested.
+Protected data/settings exact;10 captures+1stage cleaned/absence. DisposableB
+retained with SHA receipt, no runtime/favourites test yet.72 UNINSTALLED; await
+untouched readiness/explanation then NEW reservation, no automatic retry.
+
 Reviewed25 authored files106ec80+fc64026 are published and public branch HEAD
 fc640261e9f69dfefbf9c4a3dd81aa5379080bb8 verified. Exact72 installation and one
 two-disposable favourites check are approved. First NEW6269131197 preflight

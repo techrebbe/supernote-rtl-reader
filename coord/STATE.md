@@ -1,5 +1,23 @@
 # STATE — RTL Reader (updated 2026-10-19 by codex)
 
+## T020H1R1 stopped before package selection; RELEASE6270642388
+
+Fresh user library-ready signal -> NEW6270552551. Exact ordinary Nomad3.30.45/
+API30/UID2000/73% USB charging/library owner and protected-data/public/rotation
+preflight PASS. Normal Settings/Apps/Plugins verified installed71 ON. Exact72
+package and clean two-page syntheticB staged/hash verified at absent unique paths.
+Before the next Back, owner guard refused BEFORE input: foreground had returned
+to the library. Cause/user intervention UNKNOWN; no retry, picker/installation,
+PDF activation or new runtime. User asked for explanation/untouched readiness.
+
+Postflight integrity PASS;10 captures+1installer stage individually hash-backed
+removed/absence verified. Clean disposableB retained unchanged with receipt;
+local raw/candidate/71rollback retained. RELEASE6270642388, no active process.
+Exact72 UNINSTALLED; no hardware favourites result. No claim of Settings-scene
+restoration. Next NEW reservation after explanation/readiness, no unchanged build
+or speculative test loop. Previous fixture-no-write paragraphs are historical:
+only this clean syntheticB was newly staged, no original/annotation mutation.
+
 ## T020 published; first owner preflight stopped, RELEASE6269173663
 
 User approved25 reviewed authored files plus same-five-note results/issue23

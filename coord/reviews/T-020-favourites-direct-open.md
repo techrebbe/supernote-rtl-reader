@@ -2,6 +2,12 @@
 
 ## Hardware gate status (not an additional review)
 
+H1R1 reservation6270552551 also stopped before package selection/installation
+after an uncommanded foreground change; RELEASE6270642388, integrity/owned scratch
+cleanup PASS. Installed71 verified ON; exact72 still uninstalled. This is not a
+reader software failure or a visible-favourite acceptance. Cause remains UNKNOWN;
+do not attribute it to openFile/showPluginView, which were never invoked.
+
 Reviewed exact72 published through fc64026 with explicit user approval. First
 approved reservation6269131197 stopped at unexpected foreground owner before
 capture/input/install; RELEASE6269173663. No device behavior was tested and no

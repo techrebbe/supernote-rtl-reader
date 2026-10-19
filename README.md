@@ -21,6 +21,11 @@ device attempt stopped at the foreground-owner preflight, before capture,
 installation or document changes. Code72 remains uninstalled. A free Document
 library and a fresh reservation are required to resume; no new build is needed.
 
+A later library-ready attempt verified installed71 and staged the installer,
+but an unexplained return from Settings to the library stopped it before package
+selection. Temporary captures/installer were removed and data integrity passed;
+72 is still uninstalled. The clean second test PDF is retained for the next trial.
+
 ## Current priority: interactive original-PDF reading
 
 The current direction is an unrooted, dedicated RTL reading view that opens the

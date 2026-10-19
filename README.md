@@ -16,6 +16,11 @@ the normal exact-source package/signature gates. It is not installed or released
 See [T020](coord/tasks/T-020-favourites-direct-open.md) for review/build and the
 smallest disposable-device test required before use.
 
+The reviewed 25-file update is published through fc64026. The first approved
+device attempt stopped at the foreground-owner preflight, before capture,
+installation or document changes. Code72 remains uninstalled. A free Document
+library and a fresh reservation are required to resume; no new build is needed.
+
 ## Current priority: interactive original-PDF reading
 
 The current direction is an unrooted, dedicated RTL reading view that opens the

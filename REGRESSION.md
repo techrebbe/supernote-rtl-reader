@@ -1,5 +1,32 @@
 # RTL Reader hardware regression
 
+## 2026-10-19 — T020H1 NOTPERFORMED; published, device released
+
+User approved the reviewed25-file publication and exact72 installation/one
+two-disposable favourites test. Commits106ec80 and fc64026 pushed to the explicit
+project GitHub URL; public branch agent/page-turner-bridge verified at full HEAD
+fc640261e9f69dfefbf9c4a3dd81aa5379080bb8. No binary/private artifact uploaded.
+
+NEW reservation6269131197: last-known Wi-Fi endpoint connected to the exact
+ordinary-shell unrooted3.30.45/API30 Nomad, battery79%. Owner preflight found a
+focused DayWeave window and an unfocused native Document task, not an available
+native/library control. HARD STOP before screenshot/UI dump/input/stage/install,
+document/page/settings changes or protected-file/installed-payload checks.
+No remote scratch was created. No complete integrity or hardware PASS claim;
+code72 UNINSTALLED, last-verified71 and rollback packages retained.
+
+RELEASE6269173663. User asked to close DayWeave normally and leave the Document
+file list visible/free/untouched. Next needs that readiness and a NEW exclusive
+reservation/exact preflight, not reuse of the consumed scope. No device/test
+process remains. Known pinch failure unchanged; saved ink PARKED/timer PAUSED.
+
+Offline preparation verified the existing two-page synthetic display fixture:
+SHA25628b126627dd5966e8975ae1bf48385d65e1f8189e8aa32ddc0eab778904859c9,
+two pages, no PDF annotations, explicit disposable/no-personal-data labels.
+Rendered PAGE1 visually checked. Use a fresh named disposable copy as bookB;
+existing four-page interactive fixture remains bookA. No fixture/device write
+has occurred. Public notes contain no personal documents or raw evidence.
+
 ## 2026-10-19 — exact T020 code72 package verified; hardware NOT PERFORMED
 
 Source106ec80e566adce8555ab69fd94e6745c7708116 /0.4.25-library-exp1/code72 normal

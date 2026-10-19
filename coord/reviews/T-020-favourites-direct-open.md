@@ -1,5 +1,14 @@
 # T020 independent source review — 2026-10-19
 
+## Hardware gate status (not an additional review)
+
+Reviewed exact72 published through fc64026 with explicit user approval. First
+approved reservation6269131197 stopped at unexpected foreground owner before
+capture/input/install; RELEASE6269173663. No device behavior was tested and no
+source correction/new review is warranted by this stopped setup. The original
+required exact-book visible-open gate below remains pending on the SAME signed
+candidate; no hardware acceptance is inferred from publication or SDK return.
+
 User explicitly approved a separate source-only independent review. Reviewer
 `t020_independent_review` inspected the frozen18-file working diff, including all
 new source/tests, on base2d815e7e7a2531b427e702c5d3056730260fa6c7. The reviewer

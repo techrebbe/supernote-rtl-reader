@@ -1,5 +1,28 @@
 # STATE — RTL Reader (updated 2026-10-19 by codex)
 
+## T020 published; first owner preflight stopped, RELEASE6269173663
+
+User approved25 reviewed authored files plus same-five-note results/issue23
+coordination and exact72 installation/one two-disposable favourites trial. Public
+agent/page-turner-bridge verified at fc640261e9f69dfefbf9c4a3dd81aa5379080bb8;
+executable106ec80/code72/package3327f873...19d29d unchanged and UNINSTALLED.
+
+NEW6269131197 connected exact Nomad over Wi-Fi, ordinary UID2000/unrooted3.30.45/
+API30/79% power PASS. Owner check found focused DayWeave instead of available
+native/library control. NOTPERFORMED before capture/input/stage/install or any
+document/page/settings mutation; no remote scratch. Installed-payload/protected
+file/presentation gates NOT REACHED: do not claim complete integrity/hardware.
+RELEASE6269173663, no device/build/test/review process. Last-verified71/rollback
+preserved. User asked to close DayWeave normally and leave Document library ready.
+
+Concrete offline prep: existing clean two-page synthetic fixture verified by
+page count/text/no-annotations/SHA and PAGE1 visual render; fresh disposable copy
+will distinguish bookB from the existing four-page bookA. No PDF/device writes.
+Next: readiness signal, NEW reservation/exact preflight, same already-reviewed72
+normal manager install and one decisive visible-favourite reopen. No rebuild,
+emulator/review loop or consumed-scope retry. Pinch OPEN, ink PARKED, timer PAUSED,
+no merge. Earlier unpublished/no-access paragraphs below are historical.
+
 ## T020 exact72 package built/verified; publication and hardware approval gate
 
 Executable106ec80e566adce8555ab69fd94e6745c7708116 /0.4.25-library-exp1/code72:

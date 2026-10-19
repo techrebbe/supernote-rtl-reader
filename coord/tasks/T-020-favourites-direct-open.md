@@ -1,5 +1,25 @@
 # T020 — chosen-book favourites/direct-open fallback
 
+## Current approved hardware checkpoint
+
+Reviewed25 authored files106ec80+fc64026 are published and public branch HEAD
+fc640261e9f69dfefbf9c4a3dd81aa5379080bb8 verified. Exact72 installation and one
+two-disposable favourites check are approved. First NEW6269131197 preflight
+stopped at focused DayWeave before capture/input/stage/install or file/payload
+integrity checks; RELEASE6269173663. Code72 remains UNINSTALLED. Wait for user's
+Document-library readiness, then NEW reservation; no repeated unchanged tests.
+
+Prepared bookA is the existing four-page synthetic interactive fixture. BookB
+will be a fresh named copy of the existing clean two-page display fixture,
+SHA25628b126627dd5966e8975ae1bf48385d65e1f8189e8aa32ddc0eab778904859c9.
+Host page count/text/no-annotations and rendered PAGE1 checked; no PDF or device
+write yet. Do not reuse older ink-bearing test copies or personal originals.
+SaveA -> normal Close -> normal openB -> launch chooser -> selectA ONCE ->
+require actual exact-book visible READY, not show acknowledgement. On success,
+normal Close and chooser-only Close must preserve the native page; then restore
+starting library/settings, integrity, owned scratch/stage cleanup and release.
+No separate pen/Edit/zoom experiment is implied by this favourites-only scope.
+
 ## Decision and boundary (2026-10-19)
 
 User requested that chosen documents keep using RTL Reader. The pinned supported

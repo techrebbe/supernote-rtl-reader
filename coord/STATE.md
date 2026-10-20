@@ -1,6 +1,36 @@
 # STATE — RTL Reader (updated 2026-10-20 by codex)
 
-## Current T020R2:73 runtime/chooser verified; request NOT OBSERVED, physical tap needed
+## Current T020R3:73 real physical selection FAILS visible return; released/cleanup PASS
+
+Same4ae7c20/library-exp2/code73/packageb79a3f6b...ba21b47. Reservation6289435369
+consumed/released6289552279. ONE physical savedA tap after fresh device-time boundary.
+Request1 all7 phases in order; exactA context/post-open source verification and NEW
+RTL_READER_OPENED nativePage1/readerPage1 observed. The timer/context-wait boundary
+is passed in this attempt, not proof that every lifecycle issue is fixed.
+Actual current owner/footer/XML/PNG is stock DocumentActivity/SOURCE PAGE1/A1-of-4,
+not RTL; no NEW PAGE1 READY. Existing current-attempt log gate correctly rejects
+missing NEW READY. FAIL_REQUIRED_AUTOMATIC_RTL_VISIBILITY; no retry/open/show/
+relaunch/restart, pen/page or further functional capture.
+
+Failure recorded6289520425 before cleanup. Fresh exact nativeA PAGE1/4 guard,
+ONE normal Back reached verified normal Document library. Final protected PDFs/
+marks/public packages/host copies/rotation/candidate/compatible rollback PASS.
+6 exact own regular/nonsymlink/hash/local-backed captures removed once/absence
+verified; local raw/evidence and installed73/72/71 packages retained. No PDF/mark/
+installer/package deleted; no active process/observer; timer PAUSED; no more user
+physical input required for this trial. Source/installed package unchanged.
+
+Next narrowly scoped source-only correction: supported plugin visibility/order
+after cross-document open. SDK0.1.65 PluginModule.showPluginView posts a UI Runnable
+then resolves true BEFORE execution; openFile forwards host acknowledgement, not
+an exposed visible-reader completion. Actual later hide/replacement cause remains
+unverified. Do not claim the posted acknowledgement fixes visibility or add blind
+delay/re-show/restart/hardware probes. Document/page/source admission works here;
+render-ready/visible RTL remains blocking. No general framework/writer archaeology,
+unchanged rebuild/review loops, root/private hook or new hardware without a concrete
+reviewed correction/exact package and approval/reservation. No merge.
+
+## Prior T020R2:73 runtime/chooser verified; request NOT OBSERVED, physical tap needed
 
 Same executable4ae7c20/library-exp2/code73/packageb79a3f6b...ba21b47, no rebuild/
 reinstall.6288195427 consumed/released6289285064. Fresh nativeB PAGE1/2 authenticated

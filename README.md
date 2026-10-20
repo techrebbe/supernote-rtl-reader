@@ -10,12 +10,13 @@ of timer-based context checks so a hidden/paused plug-in can resume. The waiting
 chooser is not permission to render an unverified PDF. The exact4ae7c20 package
 and compatible signature are verified; the user approved installation and one
 bounded Nomad retest. The reviewed correction is published through60d277b. Exact73
-is now installed/ON with its fresh runtime and favourites chooser verified after
-authenticated disposable-PDF setup. Remote keyboard activation reached the correct
-saved-book row but did not start an observable request; physical selection is still
-needed. No return attempt has run. Protected integrity/temporary-file cleanup
-passed and the device is released; the known idle chooser remains on screen.
-No hardware fix is claimed yet;72's measured failure below remains the baseline.
+is installed/ON and has now been physically tested. The selected disposable book
+passes source/context checks and opens, but the screen stays in Supernote's native
+reader rather than returning to RTL; no new RTL page-ready event follows. Automatic
+return therefore still FAILS in73, despite the source-level progress. No retry
+was used. Normal library restoration, protected integrity and temporary-file cleanup
+passed; the device is released. A supported visibility-lifecycle correction is
+required before another device trial; no more physical input is needed for this one.
 
 The experimental build adds `Save to favourites` inside RTL Reader. On later RTL
 Reader launches, a book chooser is intended to open a saved PDF directly, or

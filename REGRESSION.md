@@ -1,5 +1,27 @@
 # RTL Reader hardware regression
 
+## 2026-10-20 — T020R3 code73 physical savedA selection: automatic RTL visibility FAIL
+
+Exact4ae7c20/0.4.25-library-exp2/code73/SNPLGb79a3f6b...ba21b47, unrooted3.30.45.
+Fresh exclusive6289435369, no agent key/touch. ONE user physical tap after fresh
+device-time boundary produced request1 preparing/open-requested/open-acknowledged/
+show-requested/show-acknowledged/context-confirmed/target-verified, in order. NEW
+exactA OPENED nativePage1/readerPage1 follows; no NEW PAGE1 READY. Actual current
+native DocumentActivity/approved footer/XML/PNG shows SOURCE PAGE1/A1-of-4, NOT RTL.
+Existing local current-attempt gate rejects missing NEW READY. Required automatic
+visible-return FAIL; successful posted show/context/source admission is not a pass.
+Exact later hide/replacement cause unknown. No retry/re-show/reopen/relaunch/
+restart/pen/page or additional hardware probe after hard stop.
+
+Failure recorded6289520425. Fresh exact nativeA1/4 guard, ONE normal Back, verified
+normal Document library. Final protected originals/annotations/disposables/public
+APKs/host copies/rotation/candidate/rollback integrity PASS.6 exact own regular/
+nonsymlink/hash/local-backed captures removed once/absence verified; local raw/
+evidence/installed73/compatible72/71 retained. No PDF/mark/package deletion.
+RELEASE6289552279, no active observer/process; timer PAUSED. No more physical action
+for this trial. Next is source-only supported visibility lifecycle correction,
+not another speculative device sequence or unchanged build/emulation loop.
+
 ## 2026-10-20 — T020R2 code73 runtime/chooser PASS; return request NOT OBSERVED
 
 Unchanged4ae7c20/library-exp2/code73/packageb79a3f6b...ba21b47. Fresh exclusive

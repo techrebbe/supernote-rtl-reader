@@ -2,6 +2,26 @@
 
 ## Current approved hardware checkpoint
 
+### T020R3: one physical selection FAILS automatic visibility; released6289552279
+
+Same4ae7c20/library-exp2/code73/packageb79a3f6b...ba21b47. Fresh6289435369 preserved
+authenticated nativeB-before-same-launch provenance, unchanged process/chooser,
+protected preflight and new device-time boundary. ONE physical savedA tap produced
+all7 request1 phases, exactA/source confirmation and NEW OPENED nativePage1/readerPage1.
+No NEW PAGE1 READY; current stock DocumentActivity/footer/PNG shows SOURCE PAGE1/A1/4,
+not RTL. Local strict gate rejects missing READY. FAIL_REQUIRED_AUTOMATIC_RTL_VISIBILITY,
+not feature acceptance or source mismatch. Exact later lifecycle cause unverified;
+timer/context stage is no longer where this attempt stops. No retry or extra probe.
+
+Recorded6289520425 before cleanup. One guarded normal Back from exact nativeA1/4
+returned verified normal Document library. Final protected hashes/rotation/host/
+rollback PASS;6 exact local-backed own regular/nonsymlink captures removed once and
+absence verified. Local raw/evidence/installed73/72/71 retained, no PDFs/marks/packages
+deleted.6289435369 consumed/released6289552279; timer PAUSED, no active observer/process.
+No more physical action for this trial. Next source-only work targets supported
+visibility lifecycle after open; SDK posted show acknowledgement is not completion.
+No blind delay/re-show/restart or hardware loop before concrete reviewed correction.
+
 ### T020R2 released: fresh73 runtime/chooser PASS; one remote activation not observed
 
 Same4ae7c20/code73/packageb79a3f6b...ba21b47.6288195427 consumed/released. NativeB

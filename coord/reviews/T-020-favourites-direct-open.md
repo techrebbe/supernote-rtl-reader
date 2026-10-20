@@ -1,5 +1,17 @@
 # T020 independent source review — 2026-10-19
 
+## T020R3 actual visibility FAIL (not another source review)
+
+ONE physical selection on unchanged73/4ae7c20 passed all7 request1 phases and exactA
+source/context/NEW OPENED, but no NEW PAGE1 READY and actual native reader A1/4,
+not RTL. Required visibility FAIL. This narrows the remaining blocker without
+retrospectively changing source review conclusions: posted show remains insufficient;
+later lifecycle cause not proved. No retry/probe. One normal exact-native Back
+restored Document library; protected integrity and6 owned-capture cleanup PASS,
+local evidence retained.6289435369 released6289552279. Source-only supported
+visibility correction needs focused tests/review/exact package before future
+hardware; no unchanged build/review/emulator cycle or more user input for this trial.
+
 ## T020R2 hardware checkpoint (not another source review)
 
 Unchanged reviewed73 now independently shows fresh exact runtime/actual chooser

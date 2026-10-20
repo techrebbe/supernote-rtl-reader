@@ -1,6 +1,31 @@
 # STATE — RTL Reader (updated 2026-10-20 by codex)
 
-## Current T020R1:73 approved/published/staged; manual installer step required
+## Current T020R1:73 installed/ON; return NOT PERFORMED, remote setup blocked
+
+User installed exact staged73. Fresh unique manager XML/PNG verifies RTL Reader
+0.4.25-library-exp2 and ON; stage hash exact. Runtime/installed native payload not
+independently authenticated by launch yet. Source4ae7c20/package unchanged;
+compatible72/71 and all local evidence retained. No build/review cycle needed.
+
+User is away and asked agent setup. Public ACTION_VIEW resolution has no stock
+Supernote PDF handler. Fresh normal top-level library observed. Under bounded
+amendment6286767632, four TAB moves reached exact Document-folder focus; ONE ENTER
+entered selection/edit mode, not the folder. No DPAD/ENTER/touch retry or Lock/Add/
+PDF action. Cleanup amendment6286786843 used one guarded normal Back; this exposed
+native DocumentActivity rather than ordinary library. UI restoration UNKNOWN;
+no further UI/underlying document interaction. Earlier premature library claim
+6285271834 explicitly corrected6285275962/6285282878; never count it as a pass.
+
+Final protected PDFs/annotations/public packages/host copies/rotation/rollback
+integrity PASS.17 individually exact regular/nonsymlink/hash/local-backed files
+(16 captures+1 installer) removed once/absence verified; local evidence retained,
+no PDFs/marks deleted.6283438138 consumed/released6286821721; no process; timer PAUSED.
+Actual favourites-return remains NOT PERFORMED, not a73 functional failure.
+Real unblock is physical normal opening of retained cleanB PAGE1/native footer,
+before RTL launch. New reservation/exact preflight then SAME approved one-shot
+savedA gate; no guessed inputs/private route or speculative rebuild while waiting.
+
+## Prior T020R1 setup:73 approved/published/staged; manual installer step required
 
 User explicitly approved code73 installation/one bounded retest and reviewed
 correction/notes publication. Exact reviewed15-file update through60d277b pushed

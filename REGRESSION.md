@@ -1,5 +1,23 @@
 # RTL Reader hardware regression
 
+## 2026-10-20 — T020R1 installed73/ON verified; return NOT PERFORMED, setup blocked
+
+User-installed exact4ae7c20/library-exp2/code73 verified by unique manager detail/ON
+and exact stage hash; runtime launch/installed payload not independently confirmed.
+No stock PDF ACTION_VIEW handler. Bounded remote library navigation: four TABs,
+one exact Document-folder ENTER entered selection/edit mode, not folder opening.
+No retry/Lock/Add/PDF/favourite action. One guarded cleanup Back exposed native
+DocumentActivity, not expected library; UI restoration UNKNOWN. Hard stop honored;
+no underlying document interaction. Earlier premature library claim explicitly
+corrected in issue6285275962/6285282878, never functional evidence.
+
+Final protected PDFs/marks/public packages/host copies/rotation/rollback PASS;
+17 own exact hash-backed regular/nonsymlink files (16 captures+1 installer) removed
+once/absence verified. Local evidence/installed73/compatible72/71 preserved; no
+PDF/mark deletion.6283438138 consumed/released, no active process, timer PAUSED.
+Required physical B PAGE1/footer setup then fresh reservation/preflight; same
+approved return trial still pending, not code73 PASS/FAIL. No speculative retries.
+
 ## 2026-10-20 — T020R1 code73 setup BLOCKED before installation; no functional result
 
 Explicitly approved exact4ae7c20/code73/package b79a3f6b...ba21b47, fresh exclusive

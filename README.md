@@ -10,10 +10,11 @@ of timer-based context checks so a hidden/paused plug-in can resume. The waiting
 chooser is not permission to render an unverified PDF. The exact4ae7c20 package
 and compatible signature are verified; the user approved installation and one
 bounded Nomad retest. The reviewed correction is published through60d277b. Exact73
-is staged, but remote installation setup requires manual selection in Supernote's
-normal plug-in manager; no return attempt has run. No hardware fix is claimed yet.
-73 is uninstalled; installed72
-and its measured failure below remain the baseline.
+is now installed and manager-verified ON after manual selection. Remote test setup
+cannot reliably open the starting disposable PDF; no return attempt has run.
+Protected-file integrity and owned temporary-file cleanup passed; the device is
+released. One physical test-PDF setup is required before the bounded return trial.
+No hardware fix is claimed yet;72's measured failure below remains the baseline.
 
 The experimental build adds `Save to favourites` inside RTL Reader. On later RTL
 Reader launches, a book chooser is intended to open a saved PDF directly, or

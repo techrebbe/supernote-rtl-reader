@@ -2,6 +2,24 @@
 
 ## Current approved hardware checkpoint
 
+### 2026-10-20 T020R1 released:73 installed/ON, functional return NOT PERFORMED
+
+Actual unique manager73/library-exp2/ON verified after user installation; runtime
+launch/installed-payload authentication pending. No source/package change. Remote
+setup requested while user away: no supported stock ACTION_VIEW PDF handler;
+bounded four TABs/one exact-folder ENTER entered library selection mode instead
+of opening. No alternate key/touch attempt. One guarded cleanup Back exposed
+native DocumentActivity, so ordinary-library restoration is UNKNOWN, not PASS.
+No underlying document/PDF/favourite/pen/page action. Prior premature library
+statement in issue6285271834 corrected6285275962/6285282878.
+
+Final protected data/public packages/host copies/rotation/rollback PASS;17 exact
+owned local-backed regular/nonsymlink files (16 captures+1 installer) removed once,
+absence verified, local evidence retained.6283438138 consumed/released; timer PAUSED,
+no process. Real unblock: physically open retained cleanB PAGE1/footer without RTL
+launch, then new reservation/preflight for SAME approved one-shot current-evidence
+return gate. Do not repeat build/install or speculative input experiments.
+
 ### 2026-10-20 T020R1: approved73 staged, installation requires human selection
 
 Reviewed15-file correction/notes through60d277b published with explicit approval;

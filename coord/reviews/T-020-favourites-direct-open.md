@@ -1,5 +1,16 @@
 # T020 independent source review — 2026-10-19
 
+## 2026-10-20 installed73 checkpoint (not another review)
+
+Manager library-exp2/ON and exact installer verified after human update. Source/
+package unchanged, runtime launch still pending. Bounded remote exact-focus setup
+could not open Document folder; selection mode then one cleanup Back exposed
+native DocumentActivity. No retry/PDF/favourite action; UI restoration UNKNOWN.
+Protected integrity PASS,17 own capture/stage files removed once/absence verified,
+local evidence preserved. Reservation6283438138 released; real physical B PAGE1/
+footer setup required before fresh reservation and existing return gate. No source
+review or code73 functional PASS/FAIL inferred; original review remains unchanged.
+
 ## 2026-10-20 installation setup status (not another review)
 
 Reviewed correction published through60d277b; unchanged executable4ae7c20/code73.

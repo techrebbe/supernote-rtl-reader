@@ -2,6 +2,24 @@
 
 ## Current approved hardware checkpoint
 
+### T020R2 released: fresh73 runtime/chooser PASS; one remote activation not observed
+
+Same4ae7c20/code73/packageb79a3f6b...ba21b47.6288195427 consumed/released. NativeB
+PAGE1/2 independently authenticated BEFORE user RTL launch; one NEW exact73 marker
+and visible savedA chooser PASS. User away requested remote selection. Source-backed
+RN focus amendment6289219398: two TABs, exact enabled savedA focus/label/path, new
+pre-action log boundary, ONE ENTER. No current favourite phases/OPENED/READY in
+immediate or settled logs; chooser unchanged. UNKNOWN_REQUEST_NOT_OBSERVED, return
+NOT PERFORMED, not feature PASS/FAIL. No alternate key/touch/private route or retry.
+
+ONE normal cleanup Back did not close chooser. Final idle PluginHost chooser
+verified; nativeB restoration NOT ESTABLISHED, no further input. Protected data/
+packages/rotation/host copies/rollback PASS;13 exact owned local-backed captures
+removed once/absence verified, local logs/evidence/packages retained. No process;
+timer PAUSED. Physical savedA tap remains unblock: notify BEFORE tap for fresh
+reservation/current-state/boundary. Do not recreate B setup unless state changed.
+No unchanged rebuild/review/emulator loop or production change to automate input.
+
 ### 2026-10-20 T020R1 released:73 installed/ON, functional return NOT PERFORMED
 
 Actual unique manager73/library-exp2/ON verified after user installation; runtime

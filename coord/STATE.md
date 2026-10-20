@@ -1,6 +1,28 @@
 # STATE — RTL Reader (updated 2026-10-20 by codex)
 
-## Current T020R1:73 installed/ON; return NOT PERFORMED, remote setup blocked
+## Current T020R2:73 runtime/chooser verified; request NOT OBSERVED, physical tap needed
+
+Same executable4ae7c20/library-exp2/code73/packageb79a3f6b...ba21b47, no rebuild/
+reinstall.6288195427 consumed/released6289285064. Fresh nativeB PAGE1/2 authenticated
+BEFORE one user launch; NEW exact73 runtime marker and actual savedA chooser PASS.
+User away requested agent selection. Amendment6289219398 used source-supported RN
+keyboard focus: two TABs, exact enabled savedA focus/label/path, new device boundary,
+ONE ENTER. Separate immediate/settled logs have ZERO current favourite phases or
+NEW OPENED/READY; actual idle chooser unchanged. UNKNOWN_REQUEST_NOT_OBSERVED;
+return NOT PERFORMED, not a feature PASS/FAIL or proof SDK open/show was invoked.
+No alternate key/touch/private invocation, retry or speculative production change.
+
+One normal cleanup Back (6289249333) did not close the chooser. Final actual
+PluginHost/XML/PNG shows known idle chooser; nativeB restoration NOT ESTABLISHED,
+no further input. Protected PDFs/marks/public packages/host copies/rotation/
+rollback integrity PASS.13 exact own regular/nonsymlink/hash/local-backed captures
+removed once/absence verified; local logs/evidence/73/72/71 retained. No PDF/mark
+deleted; no active process/observer; timer PAUSED. Real unblock is physical savedA
+tap: notify BEFORE tapping for new reservation/current-state/fresh log boundary.
+Keep current chooser if convenient; do not recreate authenticated B setup unless
+state changed. Source fix remains device-validation pending, not another build gate.
+
+## Prior T020R1:73 installed/ON; return NOT PERFORMED, remote setup blocked
 
 User installed exact staged73. Fresh unique manager XML/PNG verifies RTL Reader
 0.4.25-library-exp2 and ON; stage hash exact. Runtime/installed native payload not

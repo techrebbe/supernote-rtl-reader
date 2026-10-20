@@ -1,5 +1,17 @@
 # T020 independent source review — 2026-10-19
 
+## T020R2 hardware checkpoint (not another source review)
+
+Unchanged reviewed73 now independently shows fresh exact runtime/actual chooser
+after authenticated nativeB PAGE1/2. User-requested source-supported RN remote focus
+and ONE exact-target ENTER produced no request phase/new reader readiness; chooser
+unchanged. UNKNOWN_REQUEST_NOT_OBSERVED, no feature acceptance/failure inferred.
+One normal cleanup Back also left chooser visible; native restoration unverified.
+Protected integrity PASS,13 own captures removed once/absence, local evidence kept;
+6288195427 released, no process/timer resume. Physical savedA tap after fresh
+reservation/current-state/boundary remains gate. No source/build change or new
+review needed simply to repeat packaging; original review conclusions preserved.
+
 ## 2026-10-20 installed73 checkpoint (not another review)
 
 Manager library-exp2/ON and exact installer verified after human update. Source/

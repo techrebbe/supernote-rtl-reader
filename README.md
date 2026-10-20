@@ -10,10 +10,11 @@ of timer-based context checks so a hidden/paused plug-in can resume. The waiting
 chooser is not permission to render an unverified PDF. The exact4ae7c20 package
 and compatible signature are verified; the user approved installation and one
 bounded Nomad retest. The reviewed correction is published through60d277b. Exact73
-is now installed and manager-verified ON after manual selection. Remote test setup
-cannot reliably open the starting disposable PDF; no return attempt has run.
-Protected-file integrity and owned temporary-file cleanup passed; the device is
-released. One physical test-PDF setup is required before the bounded return trial.
+is now installed/ON with its fresh runtime and favourites chooser verified after
+authenticated disposable-PDF setup. Remote keyboard activation reached the correct
+saved-book row but did not start an observable request; physical selection is still
+needed. No return attempt has run. Protected integrity/temporary-file cleanup
+passed and the device is released; the known idle chooser remains on screen.
 No hardware fix is claimed yet;72's measured failure below remains the baseline.
 
 The experimental build adds `Save to favourites` inside RTL Reader. On later RTL

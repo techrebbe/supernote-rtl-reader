@@ -1,5 +1,24 @@
 # RTL Reader hardware regression
 
+## 2026-10-20 — T020R2 code73 runtime/chooser PASS; return request NOT OBSERVED
+
+Unchanged4ae7c20/library-exp2/code73/packageb79a3f6b...ba21b47. Fresh exclusive
+6288195427: nativeB PAGE1/2 captured BEFORE launch; one NEW exact73 runtime marker
+and actual savedA chooser PASS. User away requested remote selection. Two bounded
+TABs reached exact enabled savedA focus/label/path; new device boundary then ONE
+ENTER. Immediate/settled logs show ZERO current request phases/NEW OPENED/READY;
+actual idle chooser unchanged. UNKNOWN_REQUEST_NOT_OBSERVED, functional return
+NOT PERFORMED. No open/show invocation inferred, second key/touch/private route,
+retry or change/rebuild to production code. Physical input delivery remains gate.
+
+One normal cleanup Back did not close chooser. Final exact PluginHost/XML/PNG
+verifies idle chooser remains; nativeB restoration NOT ESTABLISHED. No further UI.
+Protected PDFs/annotations/public packages/rotation/host copies/rollback PASS;
+13 exact own regular/nonsymlink/hash/local-backed captures removed once/absence
+verified. Local evidence/logs/73/72/71 retained; no PDF/mark deletion. Reservation
+consumed/released; no observer/process, timer PAUSED. Physical savedA tap after
+fresh reservation/current-state/boundary needed, not a code73 feature failure.
+
 ## 2026-10-20 — T020R1 installed73/ON verified; return NOT PERFORMED, setup blocked
 
 User-installed exact4ae7c20/library-exp2/code73 verified by unique manager detail/ON

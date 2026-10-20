@@ -1,6 +1,29 @@
-# STATE — RTL Reader (updated 2026-10-19 by codex)
+# STATE — RTL Reader (updated 2026-10-20 by codex)
 
-## Current T020 return correction: exact73 package READY; approval/availability next
+## Current T020R1:73 approved/published/staged; manual installer step required
+
+User explicitly approved code73 installation/one bounded retest and reviewed
+correction/notes publication. Exact reviewed15-file update through60d277b pushed
+nonforce to verified public branch; executable remains4ae7c20, unchanged package.
+Fresh exclusive reservation6283438138, checkpoint6283525085. Exact unrooted3.30.45,
+power/protected PDFs/annotations/public APKs/rotation/candidate/compatible72 rollback
+preflight PASS; Wi-Fi ADB independently verified locally. No network address/raw
+device evidence published.73 staged once as RTL_READER_T020_LIBRARY73_6283438138.snplg,
+exact b79a3f6b...ba21b47; NOT installed, no functional return attempt yet.
+
+Display/XML0 versus input3 still prevents reliable remote taps. One public
+Settings launch opened Android Settings rather than Supernote's manager; owner
+guard stopped before selection. No guessed transform/keyboard retry. Fresh exact
+public Settings owner then ONE normal Back restored verified Document library;
+post-setup protected integrity/rotation PASS. User must select exact staged update
+in normal Supernote Settings/Apps/Plugins and leave library-exp2/ON visible. Then
+verify installed identity, independently capture nativeB PAGE1 before launch and
+run the already-defined single A selection/current-phase/actual-visible-RTL gate.
+Owned stage/four captures intentionally await final cleanup; local receipts and
+rollback retained. Reservation held, no active observer/process; timer PAUSED.
+This setup blocker is not a code73 functional FAIL or hardware acceptance.
+
+## Prior source checkpoint: exact73 package READY; approval/availability next
 
 Exact executable4ae7c20308059525fd8d4d63304b836f2f0ea576, normal clean archive
 build exit0/75tasks. Package0.4.25-library-exp2/code73 verified locally:

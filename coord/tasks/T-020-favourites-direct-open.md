@@ -2,7 +2,24 @@
 
 ## Current approved hardware checkpoint
 
-### Return correction73: exact package ready, approval/availability pending
+### 2026-10-20 T020R1: approved73 staged, installation requires human selection
+
+Reviewed15-file correction/notes through60d277b published with explicit approval;
+executable4ae7c20/package b79a3f6b...ba21b47 unchanged. Fresh exclusive6283438138,
+setup checkpoint6283525085. Exact power/ordinary3.30.45/protected-file/public APK/
+rotation/rollback preflight and Wi-Fi identity PASS. Exact73 staged once in MyStyle
+as RTL_READER_T020_LIBRARY73_6283438138.snplg; NOT installed. No PDF opening or
+favourite selection. Current display/input mismatch forbids guessed coordinate
+input; public Settings route opened Android Settings, not Supernote's manager.
+Owner guard stopped, then one guarded normal Back restored Document library;
+post-setup integrity PASS. No keyboard/launch retry. Needed physical step: normal
+Supernote plug-in manager selects exact stage, expected0.4.25-library-exp2/ON.
+After that, verify installation and nativeB PAGE1/footer before the existing
+single-return test. Owned installer/four captures retained pending final cleanup;
+local receipts/rollback preserved. Reservation held, no active process/timer resume.
+No private network/raw evidence upload, annotation/root/firmware change or merge.
+
+### Prior source checkpoint: exact package ready, approval/availability pending
 
 Executable4ae7c20308059525fd8d4d63304b836f2f0ea576, clean archive normal build
 exit0/75tasks. Output local tmp/t020r-return-4ae7c20-build1/out/SupernoteRtlReader.snplg.

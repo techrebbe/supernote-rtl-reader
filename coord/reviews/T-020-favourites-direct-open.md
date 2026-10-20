@@ -1,5 +1,15 @@
 # T020 independent source review — 2026-10-19
 
+## 2026-10-20 installation setup status (not another review)
+
+Reviewed correction published through60d277b; unchanged executable4ae7c20/code73.
+User approved exact install/one-shot return retest. Reservation6283438138 exact
+preflight and staged package hash PASS, but73 NOT installed: display/input mismatch
+and incompatible public Settings destination require manual normal manager selection.
+One guarded normal Back restored library; protected integrity PASS. No functional
+selection/retry or new review claim. Pending device gate is unchanged; owned stage/
+captures retained for final cleanup. Original independent review below preserved.
+
 ## Automatic-return correction review — CLEAN, source only
 
 Reviewer t020_return_fix_review independently inspected the four-file correction

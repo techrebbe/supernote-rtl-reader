@@ -1,5 +1,19 @@
 # RTL Reader hardware regression
 
+## 2026-10-20 — T020R1 code73 setup BLOCKED before installation; no functional result
+
+Explicitly approved exact4ae7c20/code73/package b79a3f6b...ba21b47, fresh exclusive
+6283438138. Protected data/public packages/rotation/power/rollback preflight PASS;
+Wi-Fi identity verified locally. Exact candidate staged once, NOT installed.
+Display/input disagreement prevented safe coordinate input. One normal public
+Settings launch reached Android Settings rather than Supernote's manager; strict
+owner guard stopped selection. One fresh-owner-verified normal Back restored
+Document library; post-setup integrity PASS. No repeated launch/keyboard/tap/PDF/
+favourite action. Manual normal plug-in-manager update required; then the same
+approved one-shot return gate, not another build/review/emulator loop. Reservation
+held; stage/four owned captures await final cleanup, local evidence kept. Not a
+code73 functional FAIL/PASS. Published summaries exclude private network/raw data.
+
 ## 2026-10-19 — T020 automatic-return73 source correction, hardware NOT PERFORMED
 
 New source ordering regression reproduces72 waiting on an RN timer while the

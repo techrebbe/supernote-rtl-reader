@@ -8,8 +8,11 @@ The73/library-exp2 correction now passes focused independent source/identity
 review and host regressions. It moves the existing single show request ahead
 of timer-based context checks so a hidden/paused plug-in can resume. The waiting
 chooser is not permission to render an unverified PDF. The exact4ae7c20 package
-and compatible signature are verified; a newly approved bounded Nomad test is
-still required. No hardware fix is claimed yet.73 is uninstalled; installed72
+and compatible signature are verified; the user approved installation and one
+bounded Nomad retest. The reviewed correction is published through60d277b. Exact73
+is staged, but remote installation setup requires manual selection in Supernote's
+normal plug-in manager; no return attempt has run. No hardware fix is claimed yet.
+73 is uninstalled; installed72
 and its measured failure below remain the baseline.
 
 The experimental build adds `Save to favourites` inside RTL Reader. On later RTL
